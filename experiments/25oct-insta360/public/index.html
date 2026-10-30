@@ -1,0 +1,572 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Insta360 IMU Viewer</title>
+<style>
+  :root { --bg:#0b0c0e; --panel:rgba(18,19,22,.86); --fg:#eef0f3; --muted:#8b919b; --line:#2a2d33; --accent:#ff5a36; --ok:#3ccf91; }
+  * { box-sizing:border-box; }
+  html,body { margin:0; height:100%; overflow:hidden; background:var(--bg); color:var(--fg);
+    font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; font-size:13px; }
+  #stage { position:fixed; inset:0; cursor:grab; }
+  #stage:active { cursor:grabbing; }
+  #panel { position:fixed; top:12px; left:12px; width:300px; max-height:calc(100% - 24px); overflow:auto;
+    background:var(--panel); backdrop-filter:blur(10px); border:1px solid var(--line); border-radius:12px; padding:14px; }
+  #panel.hidden { display:none; }
+  h1 { font-size:14px; margin:0 0 10px; font-weight:600; }
+  section { border-top:1px solid var(--line); padding:10px 0; }
+  section:first-of-type { border-top:0; padding-top:0; }
+  label { display:block; color:var(--muted); margin:6px 0 4px; }
+  .row { display:flex; gap:6px; align-items:center; }
+  .row > * { flex:1; }
+  button, select, input[type=file]::file-selector-button {
+    background:#23262b; color:var(--fg); border:1px solid var(--line); border-radius:8px; padding:7px 10px; font:inherit; cursor:pointer; }
+  button:hover, select:hover { border-color:#3a3e45; }
+  button.rec.on { background:var(--accent); border-color:var(--accent); }
+  select { width:100%; }
+  input[type=file] { width:100%; color:var(--muted); font:inherit; }
+  input[type=range] { width:100%; accent-color:var(--accent); }
+  .check { display:flex; align-items:center; gap:8px; color:var(--fg); margin:6px 0; }
+  .dot { display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--muted); margin-right:6px; }
+  .dot.on { background:var(--ok); }
+  .ypr { display:grid; grid-template-columns:repeat(3,1fr); gap:6px; margin-top:6px; }
+  .ypr div { background:#17191d; border-radius:8px; padding:8px; text-align:center; }
+  .ypr span { display:block; font-size:10px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); }
+  .ypr strong { font-variant-numeric:tabular-nums; font-size:18px; font-weight:600; }
+  .muted { color:var(--muted); line-height:1.5; }
+  code { background:#17191d; padding:1px 5px; border-radius:4px; }
+  #toggle { position:fixed; top:12px; right:12px; }
+  #rawWrap { display:none; margin-top:8px; }
+  #rawWrap.show { display:block; }
+  #rawWrap video { width:100%; border-radius:6px; background:#000; display:block; }
+  #rawInfo { color:var(--muted); font-size:11px; margin-top:4px; }
+  .calib { display:none; }
+  .calib.show { display:block; }
+  #drop { position:fixed; inset:0; display:none; align-items:center; justify-content:center; font-size:20px;
+    background:rgba(255,90,54,.15); border:3px dashed var(--accent); pointer-events:none; }
+  #drop.show { display:flex; }
+</style>
+<script type="importmap">
+  { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" } }
+</script>
+</head>
+<body>
+<div id="stage"></div>
+<div id="drop">Drop 360 video</div>
+<button id="toggle" title="Hide/show panel (H)">Panel</button>
+
+<div id="panel">
+  <h1>Insta360 × phone IMU</h1>
+
+  <section>
+    <div><span id="dot" class="dot"></span><span id="conn">waiting for phone…</span></div>
+    <p class="muted" id="phoneHint" style="margin:6px 0 0">Open <code>/phone</code> on your phone (URL is printed in the terminal).</p>
+    <label class="check"><input type="checkbox" id="sendLive" checked> Live view on phone <span class="muted" id="liveState">(off)</span></label>
+    <div class="ypr">
+      <div><span>yaw</span><strong id="yaw">0°</strong></div>
+      <div><span>pitch</span><strong id="pitch">0°</strong></div>
+      <div><span>roll</span><strong id="roll">0°</strong></div>
+    </div>
+  </section>
+
+  <section>
+    <label>360 source</label>
+    <input type="file" id="file" accept="video/*,image/*">
+    <label>…or live camera (Insta360 webcam mode)</label>
+    <div class="row">
+      <select id="cams"><option value="">Choose camera…</option></select>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <button id="play">Play / Pause</button>
+      <button id="mute">Unmute</button>
+    </div>
+  </section>
+
+  <section>
+    <label>Frame layout</label>
+    <select id="layout">
+      <option value="0">Equirectangular (stitched 360 export)</option>
+      <option value="1">Dual fisheye — top / bottom (X3 webcam)</option>
+      <option value="2">Dual fisheye — side by side</option>
+    </select>
+    <div id="calib" class="calib">
+      <label class="check"><input type="checkbox" id="swap"> Swap lenses (front ↔ back)</label>
+      <label>Lens field of view <span id="lensFovVal">200°</span></label>
+      <input type="range" id="lensFov" min="170" max="230" step="0.5" value="200">
+      <label>Lens circle size <span id="radiusVal">1.00</span></label>
+      <input type="range" id="radius" min="0.8" max="1.2" step="0.005" value="1">
+      <label>Front lens rotation <span id="rot1Val">0°</span></label>
+      <input type="range" id="rot1" min="-180" max="180" step="1" value="0">
+      <label>Back lens rotation <span id="rot2Val">0°</span></label>
+      <input type="range" id="rot2" min="-180" max="180" step="1" value="0">
+      <label>Seam blend <span id="blendVal">5°</span></label>
+      <input type="range" id="blend" min="0" max="15" step="0.5" value="5">
+      <div class="row" style="margin-top:8px"><button id="calibReset">Reset lens settings</button></div>
+    </div>
+    <label class="check"><input type="checkbox" id="showRaw"> Show raw camera frame</label>
+    <div id="rawWrap"><div id="rawSlot"></div><div id="rawInfo"></div></div>
+  </section>
+
+  <section>
+    <div class="row"><button id="recenter">Recenter</button></div>
+    <label>Heading offset <span id="headingVal">0°</span></label>
+    <input type="range" id="heading" min="-180" max="180" value="0">
+    <label>Smoothing <span id="smoothVal">0.25</span></label>
+    <input type="range" id="smooth" min="0" max="0.95" step="0.05" value="0.25">
+    <label>Field of view <span id="fovVal">80°</span></label>
+    <input type="range" id="fov" min="30" max="120" value="80">
+    <label class="check"><input type="checkbox" id="lockRoll"> Lock roll (keep horizon level)</label>
+    <label class="check"><input type="checkbox" id="usePhone" checked> Follow phone</label>
+  </section>
+
+  <section>
+    <div class="row"><button id="rec" class="rec">● Record IMU log</button></div>
+    <p class="muted" style="margin:6px 0 0">Saves a CSV of time, yaw, pitch, roll and video time — handy for the shoot sessions.</p>
+  </section>
+
+  <section class="muted">
+    Keys: <code>R</code> recenter · <code>Space</code> play · <code>H</code> panel · <code>F</code> fullscreen. Drag to look around when no phone is connected.
+  </section>
+</div>
+
+<script type="module">
+import * as THREE from 'three';
+
+const $ = (id) => document.getElementById(id);
+const DEG = THREE.MathUtils.DEG2RAD, RAD = THREE.MathUtils.RAD2DEG;
+
+// ---------- scene
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+$('stage').appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(80, innerWidth / innerHeight, 0.1, 1100);
+camera.rotation.order = 'YXZ';
+
+// Sphere seen from the inside. The fragment shader turns each view direction into a texture
+// coordinate, either for a stitched equirectangular frame or for the two raw fisheye lenses
+// (live stitching). Front of the footage = -Z = straight ahead at yaw 0.
+const sphereVert = /* glsl */`
+  varying vec3 vDir;
+  void main() {
+    vDir = position;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }`;
+const sphereFrag = /* glsl */`
+  uniform sampler2D map;
+  uniform int frameLayout;      // 0 equirect, 1 dual fisheye top/bottom, 2 dual fisheye side by side
+  uniform float lensFov;   // radians, full field of view of one lens
+  uniform float radius;    // lens circle size relative to its half of the frame
+  uniform float rot1;      // radians
+  uniform float rot2;
+  uniform float blend;     // radians, half-width of the seam crossfade
+  uniform bool swapLens;
+  varying vec3 vDir;
+  const float PI = 3.141592653589793;
+
+  // p: direction in lens space (+z = lens axis). Returns 0..1 coords inside that lens's square.
+  vec2 lensUV(vec3 p, float rot) {
+    float th = acos(clamp(p.z, -1.0, 1.0));
+    float ph = atan(p.y, p.x) + rot;
+    float r = th / (lensFov * 0.5) * 0.5 * radius;
+    return vec2(0.5) + r * vec2(cos(ph), sin(ph));
+  }
+  // Map lens-square coords into lens #i's region of the full frame.
+  vec2 region(vec2 luv, int i) {
+    luv = clamp(luv, 0.001, 0.999);
+    if (frameLayout == 1) return i == 0 ? vec2(luv.x, 0.5 + luv.y * 0.5) : vec2(luv.x, luv.y * 0.5);
+    return i == 0 ? vec2(luv.x * 0.5, luv.y) : vec2(0.5 + luv.x * 0.5, luv.y);
+  }
+
+  void main() {
+    vec3 d = normalize(vDir);
+    vec4 col;
+    if (frameLayout == 0) {
+      float lon = atan(d.x, -d.z);
+      float lat = asin(clamp(d.y, -1.0, 1.0));
+      col = texture2D(map, vec2(lon / (2.0 * PI) + 0.5, lat / PI + 0.5));
+    } else {
+      int iF = swapLens ? 1 : 0;
+      int iB = swapLens ? 0 : 1;
+      vec2 uvF = region(lensUV(vec3( d.x, d.y, -d.z), rot1), iF);   // front lens looks along -Z
+      vec2 uvB = region(lensUV(vec3(-d.x, d.y,  d.z), rot2), iB);   // back lens looks along +Z (mirrored)
+      float thF = acos(clamp(-d.z, -1.0, 1.0));
+      float w = 1.0 - smoothstep(PI * 0.5 - blend, PI * 0.5 + blend + 1e-4, thF);
+      col = mix(texture2D(map, uvB), texture2D(map, uvF), w);
+    }
+    gl_FragColor = vec4(col.rgb, 1.0);
+    #include <colorspace_fragment>
+  }`;
+
+const geo = new THREE.SphereGeometry(500, 96, 64);
+const mat = new THREE.ShaderMaterial({
+  uniforms: {
+    map: { value: makeGridTexture() },
+    frameLayout: { value: 0 },
+    lensFov: { value: 200 * DEG },
+    radius: { value: 1 },
+    rot1: { value: 0 },
+    rot2: { value: 0 },
+    blend: { value: 5 * DEG },
+    swapLens: { value: false },
+  },
+  vertexShader: sphereVert,
+  fragmentShader: sphereFrag,
+  side: THREE.BackSide,
+  depthWrite: false,
+});
+const U = mat.uniforms;
+const sphere = new THREE.Mesh(geo, mat);
+scene.add(sphere);
+function setMap(tex) { if (U.map.value && U.map.value !== tex) U.map.value.dispose(); U.map.value = tex; }
+
+// Placeholder: labelled grid so you can sanity-check directions before loading footage
+function makeGridTexture() {
+  const c = document.createElement('canvas'); c.width = 2048; c.height = 1024;
+  const g = c.getContext('2d');
+  g.fillStyle = '#15171b'; g.fillRect(0, 0, 2048, 1024);
+  g.strokeStyle = '#2b2f36'; g.lineWidth = 2;
+  for (let x = 0; x <= 2048; x += 2048 / 24) { g.beginPath(); g.moveTo(x, 0); g.lineTo(x, 1024); g.stroke(); }
+  for (let y = 0; y <= 1024; y += 1024 / 12) { g.beginPath(); g.moveTo(0, y); g.lineTo(2048, y); g.stroke(); }
+  g.strokeStyle = '#ff5a36'; g.lineWidth = 3; g.beginPath(); g.moveTo(0, 512); g.lineTo(2048, 512); g.stroke();
+  g.fillStyle = '#eef0f3'; g.font = 'bold 64px system-ui'; g.textAlign = 'center'; g.textBaseline = 'middle';
+  [['FRONT', 1024], ['RIGHT', 1536], ['BACK', 2048 - 2], ['BACK', 2], ['LEFT', 512]].forEach(([t, x]) => g.fillText(t, x, 470));
+  g.font = '40px system-ui'; g.fillText('UP', 1024, 80); g.fillText('DOWN', 1024, 960);
+  const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace; return tex;
+}
+
+// ---------- 360 sources
+const video = document.createElement('video');
+video.loop = true; video.muted = true; video.playsInline = true; video.crossOrigin = 'anonymous';
+
+function useVideoTexture() {
+  const tex = new THREE.VideoTexture(video);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  setMap(tex);
+}
+
+function loadFile(file) {
+  if (!file) return;
+  stopCamera();
+  setLayout(0); // exports from Insta360 Studio are already stitched
+  const url = URL.createObjectURL(file);
+  if (file.type.startsWith('image/')) {
+    new THREE.TextureLoader().load(url, (tex) => {
+      tex.colorSpace = THREE.SRGBColorSpace;
+      setMap(tex);
+    });
+    return;
+  }
+  video.srcObject = null;
+  video.src = url;
+  video.play();
+  useVideoTexture();
+}
+$('file').onchange = (e) => loadFile(e.target.files[0]);
+
+addEventListener('dragover', (e) => { e.preventDefault(); $('drop').classList.add('show'); });
+addEventListener('dragleave', () => $('drop').classList.remove('show'));
+addEventListener('drop', (e) => { e.preventDefault(); $('drop').classList.remove('show'); loadFile(e.dataTransfer.files[0]); });
+
+let camStream = null;
+function stopCamera() { if (camStream) camStream.getTracks().forEach((t) => t.stop()); camStream = null; }
+
+async function listCameras() {
+  try {
+    const devs = await navigator.mediaDevices.enumerateDevices();
+    const sel = $('cams'); const cur = sel.value;
+    sel.innerHTML = '<option value="">Choose camera…</option>';
+    devs.filter((d) => d.kind === 'videoinput').forEach((d, i) => {
+      const o = document.createElement('option'); o.value = d.deviceId; o.textContent = d.label || `Camera ${i + 1}`; sel.appendChild(o);
+    });
+    sel.value = cur;
+  } catch {}
+}
+$('cams').onfocus = async () => {
+  // labels only show up after permission has been granted once
+  const devs = await navigator.mediaDevices.enumerateDevices();
+  if (devs.some((d) => d.kind === 'videoinput' && !d.label)) {
+    try { (await navigator.mediaDevices.getUserMedia({ video: true })).getTracks().forEach((t) => t.stop()); } catch {}
+  }
+  listCameras();
+};
+$('cams').onchange = async (e) => {
+  if (!e.target.value) return;
+  stopCamera();
+  camStream = await navigator.mediaDevices.getUserMedia({
+    video: { deviceId: { exact: e.target.value }, width: { ideal: 3840 }, height: { ideal: 1920 } }, audio: false,
+  });
+  video.removeAttribute('src');
+  video.srcObject = camStream;
+  await video.play();
+  useVideoTexture();
+  // The X3 in 360 webcam mode sends the two raw lenses stacked top/bottom, so stitch live.
+  // Wider-than-tall frames could be either, so leave the user's choice alone there.
+  if (savedLayout == null) setLayout(video.videoHeight >= video.videoWidth * 0.75 || /insta360/i.test(e.target.selectedOptions[0].textContent) ? 1 : 0);
+};
+listCameras();
+
+// ---------- layout + lens calibration (remembered per browser)
+const CALIB_KEYS = ['lensFov', 'radius', 'rot1', 'rot2', 'blend'];
+const CALIB_DEFAULTS = { lensFov: 200, radius: 1, rot1: 0, rot2: 0, blend: 5 };
+let savedLayout = null;
+function store(k, v) { try { localStorage.setItem('i360.' + k, v); } catch {} }
+function load(k) { try { return localStorage.getItem('i360.' + k); } catch { return null; } }
+
+function setLayout(v, remember = false) {
+  $('layout').value = String(v);
+  U.frameLayout.value = +v;
+  $('calib').classList.toggle('show', +v !== 0);
+  if (remember) { savedLayout = +v; store('layout', v); }
+}
+$('layout').onchange = () => setLayout($('layout').value, true);
+
+function applyCalib() {
+  U.lensFov.value = +$('lensFov').value * DEG;
+  U.radius.value = +$('radius').value;
+  U.rot1.value = +$('rot1').value * DEG;
+  U.rot2.value = +$('rot2').value * DEG;
+  U.blend.value = +$('blend').value * DEG;
+  U.swapLens.value = $('swap').checked;
+  $('lensFovVal').textContent = (+$('lensFov').value).toFixed(1).replace(/\.0$/, '') + '°';
+  $('radiusVal').textContent = (+$('radius').value).toFixed(3);
+  $('rot1Val').textContent = $('rot1').value + '°';
+  $('rot2Val').textContent = $('rot2').value + '°';
+  $('blendVal').textContent = $('blend').value + '°';
+  CALIB_KEYS.forEach((k) => store(k, $(k).value));
+  store('swap', $('swap').checked ? '1' : '0');
+}
+CALIB_KEYS.forEach((k) => { const v = load(k); if (v != null) $(k).value = v; $(k).oninput = applyCalib; });
+$('swap').checked = load('swap') === '1';
+$('swap').onchange = applyCalib;
+$('calibReset').onclick = () => { CALIB_KEYS.forEach((k) => ($(k).value = CALIB_DEFAULTS[k])); $('swap').checked = false; applyCalib(); };
+applyCalib();
+{ const v = load('layout'); if (v != null) { savedLayout = +v; setLayout(v); } }
+
+$('showRaw').onchange = () => {
+  const on = $('showRaw').checked;
+  $('rawWrap').classList.toggle('show', on);
+  if (on) $('rawSlot').appendChild(video); else video.remove();
+};
+setInterval(() => {
+  if ($('showRaw').checked) $('rawInfo').textContent = video.videoWidth ? `${video.videoWidth} × ${video.videoHeight}` : 'no video';
+}, 500);
+
+$('play').onclick = () => (video.paused ? video.play() : video.pause());
+$('mute').onclick = () => { video.muted = !video.muted; $('mute').textContent = video.muted ? 'Unmute' : 'Mute'; };
+
+// ---------- phone orientation -> quaternion
+// Same convention as three.js DeviceOrientationControls: the view looks out of the BACK of the phone.
+const zee = new THREE.Vector3(0, 0, 1);
+const qBackCam = new THREE.Quaternion(-Math.sqrt(0.5), 0, 0, Math.sqrt(0.5)); // -90° about X
+const _e = new THREE.Euler(), _qs = new THREE.Quaternion();
+
+function deviceQuat(alpha, beta, gamma, screenAngle, out) {
+  _e.set(beta * DEG, alpha * DEG, -gamma * DEG, 'YXZ');
+  out.setFromEuler(_e);
+  out.multiply(qBackCam);
+  out.multiply(_qs.setFromAxisAngle(zee, -screenAngle * DEG));
+  return out;
+}
+
+const qRaw = new THREE.Quaternion();     // latest phone orientation
+const qTarget = new THREE.Quaternion();  // after recenter / heading / roll lock
+const qView = new THREE.Quaternion();    // smoothed, applied to camera
+const qYaw = new THREE.Quaternion();
+const yAxis = new THREE.Vector3(0, 1, 0);
+let yawRef = 0, havePhone = false, lastMsg = 0, pendingRecenter = false;
+
+function yawOf(q) { return new THREE.Euler().setFromQuaternion(q, 'YXZ').y; }
+function recenter() { if (havePhone) yawRef = yawOf(qRaw); else { dragYaw = 0; dragPitch = 0; } }
+
+// ---------- websocket
+let ws;
+function connect() {
+  ws = new WebSocket(`wss://${location.host}/ws?role=viewer`);
+  ws.onmessage = (ev) => {
+    const m = JSON.parse(ev.data);
+    if (m.type === 'status') {
+      $('conn').textContent = m.phones ? `phone connected` : 'waiting for phone…';
+      $('dot').classList.toggle('on', m.phones > 0);
+      $('phoneHint').style.display = m.phones ? 'none' : '';
+      if (m.phones > 0 && (!pc || ['failed', 'closed', 'disconnected'].includes(pc.connectionState))) startStream();
+    } else if (m.type === 'hello') {
+      setPhoneSize(m.w, m.h);
+    } else if (m.type === 'rtc-request') {
+      startStream();
+    } else if (m.type === 'rtc-answer' && pc && m.id === pcId) {
+      pc.setRemoteDescription(m.sdp).catch((err) => console.warn('answer', err));
+    } else if (m.type === 'rtc-ice' && pc && m.id === pcId) {
+      pc.addIceCandidate(m.candidate).catch(() => {});
+    } else if (m.type === 'orientation') {
+      deviceQuat(m.alpha, m.beta, m.gamma, m.screen || 0, qRaw);
+      if (!havePhone || pendingRecenter) { yawRef = yawOf(qRaw); pendingRecenter = false; qView.copy(qRaw); }
+      havePhone = true; lastMsg = performance.now();
+    } else if (m.type === 'recenter') {
+      recenter();
+    }
+  };
+  ws.onclose = () => { $('conn').textContent = 'server disconnected – retrying'; $('dot').classList.remove('on'); setTimeout(connect, 1000); };
+}
+connect();
+const wsSend = (m) => { if (ws && ws.readyState === 1) ws.send(JSON.stringify(m)); };
+
+// ---------- live view to the phone (WebRTC)
+// Each frame the scene is also rendered with a phone-shaped camera into a corner of the WebGL canvas,
+// copied to a 2D canvas, and that canvas is streamed to the phone. The phone sees exactly where it points.
+const phoneCanvas = document.createElement('canvas');
+phoneCanvas.width = 720; phoneCanvas.height = 1280;
+const phoneCtx = phoneCanvas.getContext('2d');
+const phoneCam = new THREE.PerspectiveCamera(80, 720 / 1280, 0.1, 1100);
+const phoneStream = phoneCanvas.captureStream(30);
+let pc = null, pcId = 0;
+
+function setPhoneSize(w, h) {
+  if (!w || !h) return;
+  phoneCanvas.width = w; phoneCanvas.height = h;
+  phoneCam.aspect = w / h; phoneCam.updateProjectionMatrix();
+}
+
+async function startStream() {
+  if (!$('sendLive').checked) return;
+  if (pc) pc.close();
+  const id = ++pcId;
+  const myPc = (pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] }));
+  phoneStream.getVideoTracks().forEach((t) => myPc.addTrack(t, phoneStream));
+  myPc.onicecandidate = (e) => { if (e.candidate) wsSend({ type: 'rtc-ice', id, candidate: e.candidate }); };
+  myPc.onconnectionstatechange = () => {
+    if (myPc !== pc) return;
+    $('liveState').textContent = '(' + (myPc.connectionState === 'connected' ? 'streaming' : myPc.connectionState) + ')';
+  };
+  try {
+    const sender = myPc.getSenders()[0];
+    const params = sender.getParameters();
+    params.encodings = params.encodings && params.encodings.length ? params.encodings : [{}];
+    params.encodings[0].maxBitrate = 6_000_000;
+    params.degradationPreference = 'balanced';
+    await sender.setParameters(params).catch(() => {});
+  } catch {}
+  try {
+    const offer = await myPc.createOffer();
+    if (myPc !== pc) return; // a newer connection replaced this one while we waited
+    await myPc.setLocalDescription(offer);
+    wsSend({ type: 'rtc-offer', id, sdp: myPc.localDescription });
+    $('liveState').textContent = '(connecting…)';
+  } catch (err) {
+    if (myPc === pc) console.warn('live view offer failed', err);
+  }
+}
+$('sendLive').onchange = () => {
+  if ($('sendLive').checked) startStream();
+  else { if (pc) pc.close(); pc = null; $('liveState').textContent = '(off)'; }
+};
+
+function renderPhoneView() {
+  if (!pc || pc.connectionState === 'closed') return;
+  const pr = renderer.getPixelRatio();
+  const cw = renderer.domElement.width, ch = renderer.domElement.height;
+  const s = Math.min(1, cw / phoneCanvas.width, ch / phoneCanvas.height);
+  const pw = Math.floor(phoneCanvas.width * s), ph = Math.floor(phoneCanvas.height * s);
+  phoneCam.quaternion.copy(camera.quaternion);
+  if (phoneCam.fov !== camera.fov) { phoneCam.fov = camera.fov; phoneCam.updateProjectionMatrix(); }
+  renderer.setScissorTest(true);
+  renderer.setViewport(0, 0, pw / pr, ph / pr);
+  renderer.setScissor(0, 0, pw / pr, ph / pr);
+  renderer.render(scene, phoneCam);
+  // WebGL's origin is bottom-left, the canvas's is top-left
+  phoneCtx.drawImage(renderer.domElement, 0, ch - ph, pw, ph, 0, 0, phoneCanvas.width, phoneCanvas.height);
+  renderer.setScissorTest(false);
+  renderer.setViewport(0, 0, innerWidth, innerHeight);
+}
+
+// ---------- mouse drag fallback
+let dragYaw = 0, dragPitch = 0, dragging = null;
+$('stage').addEventListener('pointerdown', (e) => { dragging = { x: e.clientX, y: e.clientY }; });
+addEventListener('pointerup', () => (dragging = null));
+addEventListener('pointermove', (e) => {
+  if (!dragging) return;
+  const k = camera.fov / innerHeight;
+  dragYaw += (e.clientX - dragging.x) * k * DEG;
+  dragPitch = THREE.MathUtils.clamp(dragPitch + (e.clientY - dragging.y) * k * DEG, -Math.PI / 2, Math.PI / 2);
+  dragging = { x: e.clientX, y: e.clientY };
+});
+addEventListener('wheel', (e) => { $('fov').value = THREE.MathUtils.clamp(+$('fov').value + e.deltaY * 0.05, 30, 120); $('fov').oninput(); });
+
+// ---------- controls
+$('recenter').onclick = recenter;
+$('heading').oninput = () => ($('headingVal').textContent = $('heading').value + '°');
+$('smooth').oninput = () => ($('smoothVal').textContent = (+$('smooth').value).toFixed(2));
+$('fov').oninput = () => { camera.fov = +$('fov').value; camera.updateProjectionMatrix(); $('fovVal').textContent = Math.round(camera.fov) + '°'; };
+$('toggle').onclick = () => $('panel').classList.toggle('hidden');
+
+addEventListener('keydown', (e) => {
+  if (e.target.tagName === 'INPUT' && e.target.type !== 'range' && e.target.type !== 'checkbox') return;
+  if (e.key === 'r' || e.key === 'R') recenter();
+  if (e.key === ' ') { e.preventDefault(); $('play').onclick(); }
+  if (e.key === 'h' || e.key === 'H') $('toggle').onclick();
+  if (e.key === 'f' || e.key === 'F') (document.fullscreenElement ? document.exitFullscreen() : document.body.requestFullscreen());
+});
+
+// ---------- IMU log
+let log = null;
+$('rec').onclick = () => {
+  if (!log) {
+    log = ['t_ms,yaw_deg,pitch_deg,roll_deg,video_time_s,source'];
+    log.t0 = performance.now();
+    $('rec').classList.add('on'); $('rec').textContent = '■ Stop & save log';
+  } else {
+    const blob = new Blob([log.join('\n')], { type: 'text/csv' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `imu-log-${new Date().toISOString().replace(/[:.]/g, '-')}.csv`;
+    a.click();
+    log = null;
+    $('rec').classList.remove('on'); $('rec').textContent = '● Record IMU log';
+  }
+};
+
+// ---------- loop
+const _out = new THREE.Euler();
+function frame() {
+  const live = havePhone && $('usePhone').checked && performance.now() - lastMsg < 2000;
+  const heading = +$('heading').value * DEG;
+
+  if (live) {
+    qYaw.setFromAxisAngle(yAxis, heading - yawRef);
+    qTarget.copy(qYaw).multiply(qRaw);
+  } else {
+    qTarget.setFromEuler(new THREE.Euler(dragPitch, heading + dragYaw, 0, 'YXZ'));
+  }
+  if ($('lockRoll').checked) {
+    _out.setFromQuaternion(qTarget, 'YXZ'); _out.z = 0; qTarget.setFromEuler(_out);
+  }
+
+  const s = +$('smooth').value;
+  qView.slerp(qTarget, 1 - s);
+  camera.quaternion.copy(qView);
+
+  _out.setFromQuaternion(qView, 'YXZ');
+  // yaw: + = turn left (three.js convention), pitch: + = look up, roll: + = tilt counter-clockwise
+  const yaw = _out.y * RAD, pitch = _out.x * RAD, roll = _out.z * RAD;
+  $('yaw').textContent = yaw.toFixed(0) + '°';
+  $('pitch').textContent = pitch.toFixed(0) + '°';
+  $('roll').textContent = roll.toFixed(0) + '°';
+  if (log) log.push([(performance.now() - log.t0).toFixed(1), yaw.toFixed(2), pitch.toFixed(2), roll.toFixed(2),
+                     video.currentTime.toFixed(3), live ? 'phone' : 'mouse'].join(','));
+
+  renderPhoneView();
+  renderer.render(scene, camera);
+  requestAnimationFrame(frame);
+}
+frame();
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight);
+});
+</script>
+</body>
+</html>

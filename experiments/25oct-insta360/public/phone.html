@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no, viewport-fit=cover">
+<title>IMU Controller</title>
+<style>
+  :root { --bg:#000; --fg:#f2f2f2; --muted:#9aa0a9; --accent:#ff5a36; --ok:#3ccf91; --glass:rgba(16,17,20,.72); }
+  * { box-sizing:border-box; }
+  html,body { margin:0; height:100%; background:var(--bg); color:var(--fg); overflow:hidden;
+    font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; -webkit-user-select:none; user-select:none; }
+  #live { position:fixed; inset:0; width:100%; height:100%; object-fit:contain; background:#000; }
+  #placeholder { position:fixed; inset:0; display:flex; align-items:center; justify-content:center; text-align:center;
+    color:var(--muted); font-size:14px; padding:32px; line-height:1.5; }
+  #ui { position:fixed; left:0; right:0; bottom:0; padding:12px 12px calc(12px + env(safe-area-inset-bottom));
+    display:flex; flex-direction:column; gap:10px; transition:opacity .2s, transform .2s; }
+  #ui.hidden { opacity:0; transform:translateY(20px); pointer-events:none; }
+  #top { position:fixed; top:0; left:0; right:0; padding:calc(10px + env(safe-area-inset-top)) 14px 10px;
+    display:flex; justify-content:space-between; font-size:12px; color:var(--muted);
+    background:linear-gradient(rgba(0,0,0,.6), transparent); pointer-events:none; }
+  #top b { color:var(--fg); font-weight:500; }
+  .dot { display:inline-block; width:7px; height:7px; border-radius:50%; background:var(--muted); margin-right:5px; vertical-align:middle; }
+  .dot.on { background:var(--ok); }
+  .readout { display:grid; grid-template-columns:repeat(3,1fr); gap:6px; }
+  .readout div { background:var(--glass); backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px); border-radius:10px; padding:8px 6px; text-align:center; }
+  .readout span { display:block; font-size:10px; color:var(--muted); text-transform:uppercase; letter-spacing:.06em; }
+  .readout strong { font-variant-numeric:tabular-nums; font-size:18px; font-weight:600; }
+  .row { display:flex; gap:8px; }
+  .row > * { flex:1; }
+  button { appearance:none; border:0; border-radius:12px; padding:15px; font-size:16px; font-weight:600;
+    background:var(--glass); backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px); color:var(--fg); }
+  button.primary { background:var(--accent); color:#fff; }
+  button:active { transform:scale(.98); }
+</style>
+</head>
+<body>
+<video id="live" playsinline autoplay muted></video>
+<div id="placeholder">Live view from the Insta360 will appear here once the laptop viewer is open with a camera or video loaded.</div>
+
+<div id="top">
+  <span><span id="dot" class="dot"></span><b id="conn">connecting…</b> · <span id="rate">0</span> Hz</span>
+  <span id="streamState">live view: off</span>
+</div>
+
+<div id="ui">
+  <div class="readout">
+    <div><span>alpha</span><strong id="a">–</strong></div>
+    <div><span>beta</span><strong id="b">–</strong></div>
+    <div><span>gamma</span><strong id="g">–</strong></div>
+  </div>
+  <button id="start" class="primary">Start sensors</button>
+  <div class="row">
+    <button id="recenter">Recenter</button>
+    <button id="hide">Hide controls</button>
+  </div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let ws, sent = 0, latest = null, running = false;
+const send = (m) => { if (ws && ws.readyState === 1) ws.send(JSON.stringify(m)); };
+
+// ---------- websocket
+function connect() {
+  ws = new WebSocket(`wss://${location.host}/ws?role=phone`);
+  ws.onopen = () => {
+    $('conn').textContent = 'connected'; $('dot').classList.add('on');
+    sendHello();
+    send({ type: 'rtc-request' });
+  };
+  ws.onclose = () => { $('conn').textContent = 'disconnected'; $('dot').classList.remove('on'); setTimeout(connect, 1000); };
+  ws.onerror = () => ws.close();
+  ws.onmessage = (ev) => {
+    const m = JSON.parse(ev.data);
+    if (m.type === 'rtc-offer') onOffer(m);
+    else if (m.type === 'rtc-ice' && pc && m.id === pcId) pc.addIceCandidate(m.candidate).catch(() => {});
+  };
+}
+connect();
+
+// Tell the laptop what shape to render the live view (portrait/landscape), capped at 1280 on the long side
+function sendHello() {
+  const ar = innerWidth / innerHeight;
+  const long = 1280;
+  const w = ar < 1 ? Math.round(long * ar) : long;
+  const h = ar < 1 ? long : Math.round(long / ar);
+  send({ type: 'hello', w: w & ~1, h: h & ~1 });
+}
+addEventListener('resize', () => setTimeout(sendHello, 200));
+
+// ---------- live view (WebRTC, laptop sends, phone receives)
+let pc = null, pcId = null;
+async function onOffer(m) {
+  if (pc) pc.close();
+  pcId = m.id;
+  pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+  const myPc = pc;
+  pc.ontrack = (e) => {
+    $('live').srcObject = e.streams[0] || new MediaStream([e.track]);
+    $('live').play().catch(() => {});
+    $('placeholder').style.display = 'none';
+  };
+  pc.onicecandidate = (e) => { if (e.candidate) send({ type: 'rtc-ice', id: m.id, candidate: e.candidate }); };
+  pc.onconnectionstatechange = () => {
+    if (myPc !== pc) return;
+    const s = pc.connectionState;
+    $('streamState').textContent = 'live view: ' + (s === 'connected' ? 'on' : s);
+    if (s === 'failed' || s === 'disconnected') $('placeholder').style.display = '';
+  };
+  await pc.setRemoteDescription(m.sdp);
+  const answer = await pc.createAnswer();
+  await pc.setLocalDescription(answer);
+  send({ type: 'rtc-answer', id: m.id, sdp: pc.localDescription });
+}
+
+// ---------- orientation
+function screenAngle() {
+  if (screen.orientation && typeof screen.orientation.angle === 'number') return screen.orientation.angle;
+  return window.orientation || 0;
+}
+function onOrientation(e) {
+  if (e.alpha == null) return;
+  latest = { type: 'orientation', alpha: e.alpha, beta: e.beta, gamma: e.gamma, screen: screenAngle(),
+             heading: e.webkitCompassHeading ?? null, t: performance.now() };
+}
+// steady ~60 Hz
+setInterval(() => {
+  if (!latest || !ws || ws.readyState !== 1) return;
+  ws.send(JSON.stringify(latest));
+  sent++;
+  $('a').textContent = latest.alpha.toFixed(0) + '°';
+  $('b').textContent = latest.beta.toFixed(0) + '°';
+  $('g').textContent = latest.gamma.toFixed(0) + '°';
+}, 16);
+setInterval(() => { $('rate').textContent = sent; sent = 0; }, 1000);
+
+$('start').onclick = async () => {
+  try {
+    if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+      const r = await DeviceOrientationEvent.requestPermission();
+      if (r !== 'granted') { alert('Motion permission was denied. Reload the page to try again.'); return; }
+    }
+    if (!running) window.addEventListener('deviceorientation', onOrientation);
+    running = true;
+    $('start').style.display = 'none';
+    $('live').play().catch(() => {});
+    if ('wakeLock' in navigator) navigator.wakeLock.request('screen').catch(() => {});
+  } catch (err) {
+    alert('Could not start sensors: ' + err.message);
+  }
+};
+
+$('recenter').onclick = () => { send({ type: 'recenter' }); if (navigator.vibrate) navigator.vibrate(30); };
+
+// tap anywhere on the picture to bring the controls back
+$('hide').onclick = (e) => { e.stopPropagation(); $('ui').classList.add('hidden'); };
+$('live').onclick = () => $('ui').classList.remove('hidden');
+$('placeholder').onclick = () => $('ui').classList.remove('hidden');
+</script>
+</body>
+</html>

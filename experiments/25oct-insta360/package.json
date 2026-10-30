@@ -1,0 +1,14 @@
+{
+  "name": "25oct-insta360",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Phone IMU -> yaw/pitch/roll in Insta360 (equirectangular) footage",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "selfsigned": "^2.4.1",
+    "ws": "^8.18.0"
+  }
+}

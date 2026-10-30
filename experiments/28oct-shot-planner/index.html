@@ -1,0 +1,1017 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shot Planner</title>
+<style>
+  :root{
+    --paper:#f6f4ee; --panel:#fffdf8; --ink:#1f2a37; --ink-2:#56616e; --ink-3:#8b939c;
+    --line:#d9d4c7; --wall:#2a3442; --grid:#e7e2d6; --furn:#c9c2b2; --furn-fill:#ece7db;
+    --model:#e0503a; --model-soft:rgba(224,80,58,.16);
+    --cam:#127a8a; --cam-soft:rgba(18,122,138,.13);
+    --door:#4f86c6; --warn:#b5531a; --ok:#2f7d4a; --accent:#1f2a37;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{background:var(--paper);color:var(--ink);font:14px/1.4 system-ui,-apple-system,"Segoe UI",sans-serif}
+  button,input,select,textarea{font:inherit;color:inherit}
+  .app{display:grid;grid-template-columns:minmax(0,1fr) 380px;grid-template-rows:auto minmax(0,1fr);height:100vh}
+  header{grid-column:1/-1;display:flex;align-items:center;gap:14px;padding:10px 16px;border-bottom:1px solid var(--line);background:var(--panel);flex-wrap:wrap}
+  header h1{font-size:15px;margin:0;font-weight:650;letter-spacing:.01em}
+  header .sub{color:var(--ink-2);font-family:var(--mono);font-size:12px}
+  header .spacer{flex:1}
+  .btn{border:1px solid var(--line);background:#fff;border-radius:7px;padding:6px 10px;cursor:pointer;white-space:nowrap}
+  .btn:hover{border-color:var(--ink-3)}
+  .btn.primary{background:var(--ink);color:#fff;border-color:var(--ink)}
+  .btn.primary:hover{background:#334155}
+  .btn.danger{color:#a3311f}
+  .btn.small{padding:3px 8px;font-size:12.5px}
+  .seg{display:inline-flex;border:1px solid var(--line);border-radius:7px;overflow:hidden;background:#fff}
+  .seg button{border:0;background:none;padding:5px 10px;cursor:pointer}
+  .seg button.on{background:var(--ink);color:#fff}
+  label.chk{display:inline-flex;gap:6px;align-items:center;color:var(--ink-2);font-size:13px;cursor:pointer;white-space:nowrap}
+
+  .stage{position:relative;min-height:0;display:flex;flex-direction:column}
+  .banner{display:none;align-items:center;gap:10px;margin:12px 16px 0;padding:9px 12px;border-radius:9px;background:var(--ink);color:#fff}
+  .banner.show{display:flex}
+  .banner .step{font-family:var(--mono);font-size:12px;opacity:.75}
+  .banner .dot{width:12px;height:12px;border-radius:50%}
+  .banner .btn{margin-left:auto;background:transparent;color:#fff;border-color:rgba(255,255,255,.35)}
+  #plan{flex:1;min-height:0;width:100%;display:block;touch-action:none}
+  #plan.placing{cursor:crosshair}
+  .legend{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:12px;color:var(--ink-2);padding:6px 16px 12px}
+  .legend span{display:inline-flex;align-items:center;gap:5px}
+  .legend i{display:inline-block;width:10px;height:10px;border-radius:50%}
+
+  aside{border-left:1px solid var(--line);background:var(--panel);overflow:auto;min-height:0}
+  .sec{padding:14px 16px;border-bottom:1px solid var(--line)}
+  .sec h2{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-2);margin:0 0 10px;font-weight:650;display:flex;align-items:center;gap:8px}
+  .sec h2 .right{margin-left:auto}
+  .shots{display:flex;flex-direction:column;gap:6px}
+  .shot{display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid var(--line);border-radius:9px;cursor:pointer;background:#fff}
+  .shot.sel{border-color:var(--ink);box-shadow:0 0 0 1px var(--ink)}
+  .shot .num{font-family:var(--mono);font-size:12px;width:24px;height:24px;border-radius:6px;background:var(--paper);display:grid;place-items:center;font-weight:600}
+  .shot.sel .num{background:var(--ink);color:#fff}
+  .shot .meta{font-size:12px;color:var(--ink-2);font-family:var(--mono)}
+  .shot .nm{font-weight:550}
+  .shot .flag{margin-left:auto;font-size:11.5px;color:var(--warn)}
+  .empty{color:var(--ink-2);font-size:13px;padding:6px 0 2px}
+
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px 10px}
+  .fld{display:flex;flex-direction:column;gap:3px}
+  .fld>span{font-size:11.5px;color:var(--ink-2)}
+  .fld input[type=number],.fld input[type=text],.fld select,textarea{border:1px solid var(--line);border-radius:6px;padding:5px 7px;background:#fff;width:100%}
+  .fld input:focus,textarea:focus,select:focus{outline:2px solid rgba(31,42,55,.25);outline-offset:0}
+  .full{grid-column:1/-1}
+  input[type=range]{width:100%}
+  .who{display:flex;align-items:center;gap:8px;margin:2px 0 8px;font-weight:600}
+  .who i{width:10px;height:10px;border-radius:50%;display:inline-block}
+  .who .btn{margin-left:auto;font-weight:400}
+  .readout{font-family:var(--mono);font-size:12.5px;background:var(--paper);border-radius:8px;padding:8px 10px;display:grid;grid-template-columns:auto 1fr;gap:3px 12px}
+  .readout b{font-weight:600;color:var(--ink)}
+  .readout span{color:var(--ink-2)}
+  .warn{color:var(--warn);font-size:12.5px;margin-top:8px}
+  .okc{color:var(--ok)}
+  .row{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
+  textarea{min-height:52px;resize:vertical}
+  .pending{border:1px dashed var(--ink-3);border-radius:8px;padding:9px 10px;color:var(--ink-2);font-size:13px;display:flex;align-items:center;gap:8px}
+
+  #refSec img{width:100%;border-radius:8px;cursor:zoom-in;display:block}
+  #refSec .cap{font-size:11.5px;color:var(--ink-2);margin-top:6px}
+  #lightbox{position:fixed;inset:0;background:rgba(0,0,0,.85);display:none;place-items:center;z-index:50;cursor:zoom-out}
+  #lightbox.show{display:grid} #lightbox img{max-width:94vw;max-height:94vh;border-radius:6px}
+  .preview-wrap{position:relative;background:#1b1f24;border-radius:9px;overflow:hidden}
+  #preview{display:block;width:100%}
+  .preview-msg{position:absolute;inset:0;display:grid;place-items:center;color:#9aa4ae;font-size:12.5px;text-align:center;padding:16px}
+  .frame-lines{position:absolute;inset:0;pointer-events:none}
+  .preview-cap{font-family:var(--mono);font-size:11.5px;color:var(--ink-2);margin-top:6px;display:flex;justify-content:space-between}
+
+  #sheet{display:none}
+  @media print{
+    .app{display:none} #sheet{display:block}
+    body{background:#fff}
+    .page{page-break-after:always;padding:8mm 4mm}
+    .page h3{margin:0 0 4px;font-size:18px}
+    .page .pm{display:grid;grid-template-columns:1.4fr 1fr;gap:16px;align-items:start}
+    .page table{border-collapse:collapse;font-size:12px;width:100%}
+    .page td{border-bottom:1px solid #ddd;padding:4px 6px}
+    .page td:first-child{color:#666;width:45%}
+    .page svg{width:100%;height:auto;border:1px solid #ddd}
+    .page img{max-width:100%;max-height:110mm;margin-top:10px;border:1px solid #ddd}
+  }
+  @media (max-width:900px){
+    .app{grid-template-columns:1fr;grid-template-rows:auto 60vh auto;height:auto}
+    aside{border-left:0;border-top:1px solid var(--line)}
+  }
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+}}
+</script>
+<script src="room-glb.js"></script>
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1>Shot Planner</h1>
+    <input type="text" id="shootId" placeholder="Shoot ID" style="width:90px;border:1px solid var(--line);border-radius:7px;padding:5px 8px;background:#fff">
+    <input type="text" id="photographer" placeholder="Photographer name" style="width:150px;border:1px solid var(--line);border-radius:7px;padding:5px 8px;background:#fff">
+    <input type="datetime-local" id="shootWhen" title="Shoot date & time" style="border:1px solid var(--line);border-radius:7px;padding:4px 8px;background:#fff">
+    <select id="locSel" class="btn" title="Location"></select>
+    <span class="sub" id="roomSub"></span>
+    <span class="spacer"></span>
+    <div class="seg" id="units"><button data-u="m" class="on">m</button><button data-u="ft">ft·in</button></div>
+    <label class="chk"><input type="checkbox" id="showFurn" checked> Furniture</label>
+    <label class="chk"><input type="checkbox" id="showOthers" checked> Other shots</label>
+    <button class="btn" id="linkBtn" title="Copy a link that restores this plan">Copy link</button>
+    <button class="btn" id="exportBtn" title="Download all shots as JSON">Export</button>
+    <button class="btn" id="importBtn">Import</button>
+    <input type="file" id="importFile" accept=".json,application/json" hidden>
+    <button class="btn" id="printBtn" title="Print / save PDF: one page per shot">Shot sheet</button>
+  </header>
+
+  <div class="stage">
+    <div class="banner" id="banner">
+      <span class="dot" id="bannerDot"></span>
+      <span id="bannerText"></span>
+      <span class="step" id="bannerStep"></span>
+      <button class="btn small" id="bannerCancel">Cancel</button>
+    </div>
+    <svg id="plan" xmlns="http://www.w3.org/2000/svg"></svg>
+    <div class="legend">
+      <span><i style="background:var(--model)"></i>Model</span>
+      <span><i style="background:var(--cam)"></i>Camera + field of view</span>
+      <span><i style="background:var(--door)"></i>Door</span>
+      <span style="color:var(--ink-3)">Drag pins to move · drag the small handle to rotate</span>
+    </div>
+  </div>
+
+  <aside>
+    <div class="sec" id="refSec" style="display:none"></div>
+    <div class="sec">
+      <h2>Shots <span class="right"><button class="btn primary small" id="addShot">+ Add shot</button></span></h2>
+      <div class="shots" id="shotList"></div>
+    </div>
+    <div id="editor"></div>
+  </aside>
+</div>
+<div id="sheet"></div>
+<div id="lightbox"><img alt="Reference"></div>
+
+<script>
+/* ---------------- Room data (extracted from 10_27_2026.glb, metres) ----------------
+   Plan coordinates: x → right, z → down (toward the door). Origin = room centre. */
+const ROOMS = {};
+ROOMS.booth = {
+  name: "Phone booth (indoor, scan 27 Oct 2026)",
+  label: "Phone booth (indoor)",
+  interior: { x0:-1.559, x1:1.559, z0:-1.086, z1:1.036 },   // 3.117 × 2.121 m
+  wallT: 0.10,
+  ceiling: 2.542,
+  door: { x0:-1.494, x1:1.494, z:1.036, h:2.512 },          // along the front wall
+  furniture: [
+    { id:"table",  label:"Table",        cx:0.699,  cz:0.241,  w:1.423, d:0.853, ang:0,    h:0.76 },
+    { id:"chairA", label:"Swivel chair", cx:0.896,  cz:-0.596, w:0.709, d:0.613, ang:90,   h:1.06 },
+    { id:"chairB", label:"Swivel chair", cx:0.467,  cz:-0.765, w:0.486, d:0.380, ang:90,   h:0.90 },
+    { id:"chairC", label:"Chair",        cx:-0.124, cz:-0.560, w:0.607, d:0.564, ang:56.8, h:0.83 },
+    { id:"chairD", label:"Swivel chair", cx:-0.692, cz:-0.394, w:0.645, d:0.507, ang:90,   h:1.01 },
+    { id:"shelf",  label:"Shelf",        cx:-1.333, cz:-0.335, w:1.151, d:0.351, ang:-90,  h:1.00 }
+  ]
+};
+/* Studio: 16 × 16 ft white space, not scanned. Ceiling height is a placeholder.
+   Two lights stand near the back wall (positions approximate — adjust here). */
+const STUDIO_HALF = 16*0.3048/2;
+ROOMS.studio = {
+  name: "Studio (indoor, 16 × 16 ft)",
+  label: "Studio (indoor)",
+  interior: { x0:-STUDIO_HALF, x1:STUDIO_HALF, z0:-STUDIO_HALF, z1:STUDIO_HALF },
+  wallT: 0.10,
+  ceiling: 3.0,
+  door: null,
+  furniture: [
+    { id:"lightL", label:"Light", cx:-1.2, cz:-STUDIO_HALF+0.5, w:0.5, d:0.5, ang:0, h:2.0 },
+    { id:"lightR", label:"Light", cx: 1.2, cz:-STUDIO_HALF+0.5, w:0.5, d:0.5, ang:0, h:2.0 }
+  ]
+};
+/* Outdoor: the street corner at 56 Bogart St, Brooklyn, rebuilt by hand from a Google Street View frame
+   (Sep 2026) plus satellite imagery. Window around the corner of the building, cut off ROAD_STRIP past each
+   curb so camera and model positions stay within the parked-car lane, never out in traffic.
+   Plan axes: x → right, z → down. Plan "up" runs along Bogart St, away from the corner (compass not verified).
+   Building = top-left (x < -0.5, z < -1.5); its windowed facade faces the cross street (bottom of plan) and its tan
+   side wall faces Bogart St (right). Corner sidewalk has a rounded curb; the signed utility pole stands on it.
+   Facade layout, window sizes and heights are eyeballed from one photo — adjust here. */
+const ROAD_STRIP = 2.0;   // metres of roadway kept past the curb: one parked car's lane (a car is ~1.8 m wide),
+                          // so a camera can stand in the parking lane but never further out into traffic
+ROOMS.outdoor = {
+  name: "Outdoor — corner at 56 Bogart St (8 × 7.5 m)",
+  label: "Outdoor (56 Bogart St corner)",
+  outdoor: true,
+  interior: { x0:-4, x1:2.0+ROAD_STRIP, z0:-4, z1:1.5+ROAD_STRIP },   // road edges = curb (below) + ROAD_STRIP
+  wallT: 0.10,
+  ceiling: 60,
+  door: null,
+  reference: { src:"ref/bogart-streetview.jpg", caption:"Google Street View, Sep 2026 — corner of Bogart St (the scene is rebuilt from this)" },
+  corner: { x:-0.5, z:-1.5 },                     // building's outside corner
+  curb:   { x:2.0, z:1.5, r:1.5 },                // sidewalk outer corner (arc centre = x-r, z-r)
+  crosswalk: { x0:2.6, x1:4.0, z0:2.0, z1:1.5+ROAD_STRIP, n:3 },
+  furniture: [
+    { id:"building", label:"56 BOGART ST — building", cx:-2.25, cz:-2.75, w:3.5, d:2.5, ang:0, h:16, fill:"#b98a6d", stroke:"#8b5a45", labelColor:"#fff" },
+    { id:"pole",  label:"Signed pole", cx:0.35, cz:1.0, w:0.3, d:0.3, ang:0, h:8.0, round:true },
+    { id:"shrub", label:"Shrubs",      cx:1.45, cz:-2.4, w:1.3, d:2.2, ang:0, h:1.2, fill:"#a9c59a", stroke:"#6d9a5c" },
+    { id:"drain", label:"Drain",       cx:1.3,  cz:2.0,  w:0.9, d:0.45, ang:0, h:0.0, fill:"#555a60", stroke:"#333", labelColor:"#fff" }
+  ]
+};
+let ROOM, IN, W, D;
+function applyRoom(){ ROOM=ROOMS[state.loc]; IN=ROOM.interior; W=IN.x1-IN.x0; D=IN.z1-IN.z0; }
+const S = 100; // svg units per metre (cm)
+
+/* ---------------- State ---------------- */
+const KEY = "shotplanner.office-2026-10-27.v1";
+const FOCALS = [14,16,20,24,28,35,50,85,105,135];
+let state = load() || { shots:[], selId:null, units:"m", showFurn:true, showOthers:true };
+if(!ROOMS[state.loc]){ state.loc="booth"; }
+state.byLoc = state.byLoc || {};
+state.shoot = state.shoot || { id:"", photographer:"", when:"" };   // shots of the locations that aren't currently open
+state.shoot.id = state.shoot.id || ""; state.shoot.photographer = state.shoot.photographer || "";
+applyRoom();
+let mode = null;            // null | {step:'model'|'camera', shotId, single:bool}
+let drag = null;
+
+/* URL hash (#s=…) carries the whole plan, so a link restores it; it wins over localStorage. */
+function encodeState(st){ return btoa(unescape(encodeURIComponent(JSON.stringify(st)))).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,""); }
+function decodeState(t){ t=t.replace(/-/g,"+").replace(/_/g,"/"); while(t.length%4) t+="="; return JSON.parse(decodeURIComponent(escape(atob(t)))); }
+function load(){
+  try{ const m=location.hash.match(/[#&]s=([^&]+)/); if(m) return decodeState(m[1]); }catch(e){}
+  try{ return JSON.parse(localStorage.getItem(KEY)); }catch(e){ return null; }
+}
+function save(){
+  try{ localStorage.setItem(KEY, JSON.stringify(state)); }catch(e){}
+  try{ history.replaceState(null,"","#s="+encodeState(state)); }catch(e){}
+}
+const uid = () => Math.random().toString(36).slice(2,9);
+const sel = () => state.shots.find(s=>s.id===state.selId) || null;
+const idx = s => state.shots.indexOf(s)+1;
+
+function newShot(){
+  const n = state.shots.length+1;
+  return { id:uid(), name:`Shot ${n}`, notes:"", model:null, camera:null };
+}
+function defaultModel(x,z){ return { x, z, rot:-90, height:1.70, pose:"" }; }
+function defaultCamera(x,z){ return { x, z, rot:-90, height:1.50, focal:35, orient:"landscape", tilt:0, aim:true }; }
+
+/* ---------------- Geometry helpers ---------------- */
+const rad = d => d*Math.PI/180, deg = r => r*180/Math.PI;
+const clamp = (v,a,b)=>Math.max(a,Math.min(b,v));
+const norm360 = a => ((a%360)+360)%360;
+function sensor(c){ return c.orient==="portrait" ? {w:24,h:36} : {w:36,h:24}; }
+function hfov(c){ return 2*Math.atan(sensor(c).w/(2*c.focal)); }
+function vfov(c){ return 2*Math.atan(sensor(c).h/(2*c.focal)); }
+function aimCamera(shot){
+  const m=shot.model,c=shot.camera;
+  if(m&&c&&c.aim){ const dx=m.x-c.x, dz=m.z-c.z; if(Math.hypot(dx,dz)>0.01) c.rot=deg(Math.atan2(dz,dx)); }
+}
+function inside(x,z){ return x>IN.x0 && x<IN.x1 && z>IN.z0 && z<IN.z1; }
+function hitFurniture(x,z,pad=0){
+  if(!state.showFurn) return null;
+  for(const f of ROOM.furniture){
+    const a=rad(-f.ang), dx=x-f.cx, dz=z-f.cz;
+    const lx=dx*Math.cos(a)-dz*Math.sin(a), lz=dx*Math.sin(a)+dz*Math.cos(a);
+    if(Math.abs(lx)<f.w/2+pad && Math.abs(lz)<f.d/2+pad) return f;
+  }
+  return null;
+}
+function snap(v){ return Math.round(v*100)/100; } // 1 cm
+
+/* ---------------- Units ---------------- */
+function fmt(m, short){
+  if(state.units==="ft"){
+    const totalIn = m/0.0254; let ft=Math.floor(totalIn/12); let inch=Math.round(totalIn-ft*12);
+    if(inch===12){ft++;inch=0;}
+    return ft? `${ft}′ ${inch}″` : `${inch}″`;
+  }
+  return short && m<1 ? `${Math.round(m*100)} cm` : `${m.toFixed(2)} m`;
+}
+function toUnit(m){ return state.units==="ft" ? +(m/0.3048).toFixed(2) : +m.toFixed(2); }
+function fromUnit(v){ return state.units==="ft" ? v*0.3048 : v; }
+const uLabel = () => state.units==="ft" ? "ft" : "m";
+
+/* ---------------- Plan rendering ---------------- */
+function viewBox(){ const m=0.55, top=0.68, bot=0.82; return [(IN.x0-m)*S, (IN.z0-top)*S, (W+2*m)*S, (D+top+bot)*S]; }
+
+function dimLine(x1,y1,x2,y2,label,off,vertical){
+  // x/y in svg units; off = offset of the label perpendicular
+  const t=6, mx=(x1+x2)/2, my=(y1+y2)/2;
+  let s=`<g class="dim" stroke="#56616e" stroke-width="0.9" fill="none">
+    <line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"/>`;
+  if(vertical){
+    s+=`<line x1="${x1-t}" y1="${y1}" x2="${x1+t}" y2="${y1}"/><line x1="${x2-t}" y1="${y2}" x2="${x2+t}" y2="${y2}"/>`;
+  } else {
+    s+=`<line x1="${x1}" y1="${y1-t}" x2="${x1}" y2="${y1+t}"/><line x1="${x2}" y1="${y2-t}" x2="${x2}" y2="${y2+t}"/>`;
+  }
+  s+=`</g>`;
+  const tx = vertical ? mx+off : mx, ty = vertical ? my : my+off;
+  const rot = vertical ? `rotate(-90 ${tx} ${ty})` : "";
+  s+=`<text x="${tx}" y="${ty}" transform="${rot}" text-anchor="middle" dominant-baseline="middle"
+      font-family="ui-monospace,Menlo,monospace" font-size="9" fill="#1f2a37" paint-order="stroke" stroke="#f6f4ee" stroke-width="5">${label}</text>`;
+  return s;
+}
+
+function fovWedge(c, color, opacity, cid="roomClip"){
+  const hf=hfov(c), L=6*S, x=c.x*S, z=c.z*S, r=rad(c.rot);
+  const a1=r-hf/2, a2=r+hf/2;
+  return `<path d="M${x},${z} L${x+L*Math.cos(a1)},${z+L*Math.sin(a1)} L${x+L*Math.cos(a2)},${z+L*Math.sin(a2)} Z"
+    fill="${color}" fill-opacity="${opacity}" stroke="${color}" stroke-opacity="${opacity*3}" stroke-width="1" clip-path="url(#${cid})"/>`;
+}
+
+function modelGlyph(m, n, active){
+  const x=m.x*S, z=m.z*S, op = active?1:.35;
+  const hx=x+42*Math.cos(rad(m.rot)), hz=z+42*Math.sin(rad(m.rot));
+  return `<g opacity="${op}">
+    ${active?`<line x1="${x}" y1="${z}" x2="${hx}" y2="${hz}" stroke="var(--model)" stroke-width="1.4" stroke-dasharray="3 3"/>`:""}
+    <g transform="translate(${x} ${z}) rotate(${m.rot})" ${active?'data-drag="model" style="cursor:move"':""}>
+      <ellipse rx="12" ry="22" fill="var(--model)" stroke="#fff" stroke-width="2"/>
+      <circle r="8.5" cx="2" fill="#fff" fill-opacity=".9"/>
+      <path d="M10,-6 L19,0 L10,6 Z" fill="var(--model)"/>
+    </g>
+    <text x="${x}" y="${z-30}" text-anchor="middle" font-size="9" font-weight="700" fill="var(--model)" paint-order="stroke" stroke="#f6f4ee" stroke-width="4">M${n}</text>
+    ${active?`<circle cx="${hx}" cy="${hz}" r="6" fill="#fff" stroke="var(--model)" stroke-width="2" data-drag="model-rot" style="cursor:grab"/>`:""}
+  </g>`;
+}
+function cameraGlyph(c, n, active){
+  const x=c.x*S, z=c.z*S, op=active?1:.35;
+  const hx=x+40*Math.cos(rad(c.rot)), hz=z+40*Math.sin(rad(c.rot));
+  return `<g opacity="${op}">
+    <g transform="translate(${x} ${z}) rotate(${c.rot})" ${active?'data-drag="camera" style="cursor:move"':""}>
+      <rect x="-11" y="-13" width="20" height="26" rx="3" fill="var(--cam)" stroke="#fff" stroke-width="2"/>
+      <rect x="9" y="-6" width="8" height="12" rx="1.5" fill="var(--cam)" stroke="#fff" stroke-width="1.5"/>
+      <circle r="5" cx="-1" fill="#fff" fill-opacity=".85"/>
+    </g>
+    <text x="${x}" y="${z-24}" text-anchor="middle" font-size="9" font-weight="700" fill="var(--cam)" paint-order="stroke" stroke="#f6f4ee" stroke-width="4">C${n}</text>
+    ${active && !c.aim ? `<circle cx="${hx}" cy="${hz}" r="6" fill="#fff" stroke="var(--cam)" stroke-width="2" data-drag="camera-rot" style="cursor:grab"/>`:""}
+  </g>`;
+}
+
+function wallDistances(m){
+  // dashed lines from the model to the nearest side wall and nearest front/back wall
+  const x=m.x*S, z=m.z*S, out=[];
+  const toL=m.x-IN.x0, toR=IN.x1-m.x, toB=m.z-IN.z0, toF=IN.z1-m.z;
+  const wx = toL<toR ? IN.x0 : IN.x1, dx=Math.min(toL,toR);
+  const wz = toB<toF ? IN.z0 : IN.z1, dz=Math.min(toB,toF);
+  out.push(`<line x1="${x}" y1="${z}" x2="${wx*S}" y2="${z}" stroke="var(--model)" stroke-width="1" stroke-dasharray="2 3"/>`);
+  out.push(`<text x="${(x+wx*S)/2}" y="${z-6}" text-anchor="middle" font-size="8.5" font-family="ui-monospace,Menlo,monospace" fill="var(--model)" paint-order="stroke" stroke="#f6f4ee" stroke-width="4">${fmt(dx,true)}</text>`);
+  out.push(`<line x1="${x}" y1="${z}" x2="${x}" y2="${wz*S}" stroke="var(--model)" stroke-width="1" stroke-dasharray="2 3"/>`);
+  out.push(`<text x="${x+6}" y="${(z+wz*S)/2}" text-anchor="start" dominant-baseline="middle" font-size="8.5" font-family="ui-monospace,Menlo,monospace" fill="var(--model)" paint-order="stroke" stroke="#f6f4ee" stroke-width="4">${fmt(dz,true)}</text>`);
+  return out.join("");
+}
+
+function planMarkup(opts){
+  const {shots, activeId, showOthers, showFurn, ghost} = opts; const cid = opts.cid || "roomClip";
+  const t=ROOM.wallT*S, x0=IN.x0*S, x1=IN.x1*S, z0=IN.z0*S, z1=IN.z1*S;
+  let s=`<defs>
+    <clipPath id="${cid}"><rect x="${x0}" y="${z0}" width="${W*S}" height="${D*S}"/></clipPath>
+    <pattern id="g10" width="10" height="10" patternUnits="userSpaceOnUse"><path d="M10 0H0V10" fill="none" stroke="var(--grid)" stroke-width=".5"/></pattern>
+    <pattern id="g50" x="${x0}" y="${z0}" width="50" height="50" patternUnits="userSpaceOnUse"><rect width="50" height="50" fill="url(#g10)"/><path d="M50 0H0V50" fill="none" stroke="#d6cfbf" stroke-width=".9"/></pattern>
+  </defs>`;
+  // floor + grid
+  const OUT = !!ROOM.outdoor;
+  s+=`<rect x="${x0}" y="${z0}" width="${W*S}" height="${D*S}" fill="${OUT?'#6b6e72':'#fbfaf6'}"/>`;
+  if(OUT){
+    const c=ROOM.curb, k=ROOM.corner, cw=ROOM.crosswalk, ax=c.x-c.r, az=c.z-c.r;
+    const sw=`M${IN.x0} ${IN.z0} L${c.x} ${IN.z0} L${c.x} ${az} A${c.r} ${c.r} 0 0 1 ${ax} ${c.z} L${IN.x0} ${c.z} Z`;
+    const cb=`M${c.x} ${IN.z0} L${c.x} ${az} A${c.r} ${c.r} 0 0 1 ${ax} ${c.z} L${IN.x0} ${c.z}`;
+    s+=`<g transform="scale(${S})"><path d="${sw}" fill="#cfcac0"/><path d="${cb}" fill="none" stroke="#8f8b83" stroke-width=".16"/></g>`;
+    // sidewalk slab joints
+    for(let z=k.z+1.5; z<c.z-0.3; z+=1.5) s+=`<line x1="${IN.x0*S}" y1="${z*S}" x2="${ax*S}" y2="${z*S}" stroke="#b5afa3" stroke-width="1"/>`;
+    for(let x=k.x+1.25; x<c.x-0.3; x+=1.25) s+=`<line x1="${x*S}" y1="${IN.z0*S}" x2="${x*S}" y2="${(k.z+0.0)*S}" stroke="#b5afa3" stroke-width="1" opacity="0"/>`;
+    // crosswalk (stripes run along the traffic direction)
+    const sw2=(cw.x1-cw.x0)/(cw.n*2-1);
+    for(let i=0;i<cw.n;i++) s+=`<rect x="${(cw.x0+i*2*sw2)*S}" y="${cw.z0*S}" width="${sw2*S}" height="${(cw.z1-cw.z0)*S}" fill="#f2f2f0" opacity=".85"/>`;
+  }
+  s+=`<rect x="${x0}" y="${z0}" width="${W*S}" height="${D*S}" fill="url(#g50)" opacity="${OUT?.3:ghost?.5:1}"/>`;
+  // walls (door leaves a gap in the front wall)
+  if(OUT) s+=`<rect x="${x0}" y="${z0}" width="${W*S}" height="${D*S}" fill="none" stroke="var(--wall)" stroke-width="1" stroke-dasharray="4 3"/>`;
+  else s+=`<g fill="var(--wall)">
+    <rect x="${x0-t}" y="${z0-t}" width="${W*S+2*t}" height="${t}"/>
+    <rect x="${x0-t}" y="${z0-t}" width="${t}" height="${D*S+2*t}"/>
+    <rect x="${x1}" y="${z0-t}" width="${t}" height="${D*S+2*t}"/>
+    ${ROOM.door ? `<rect x="${x0-t}" y="${z1}" width="${(ROOM.door.x0-IN.x0)*S+t}" height="${t}"/>
+    <rect x="${ROOM.door.x1*S}" y="${z1}" width="${(IN.x1-ROOM.door.x1)*S+t}" height="${t}"/>`
+    : `<rect x="${x0-t}" y="${z1}" width="${W*S+2*t}" height="${t}"/>`}
+  </g>`;
+  if(ROOM.door) s+=`<g><rect x="${ROOM.door.x0*S}" y="${z1}" width="${(ROOM.door.x1-ROOM.door.x0)*S}" height="${t}" fill="#fff" stroke="var(--door)" stroke-width="1.5"/>
+    <line x1="${ROOM.door.x0*S}" y1="${z1+t/2}" x2="${ROOM.door.x1*S}" y2="${z1+t/2}" stroke="var(--door)" stroke-width="1" stroke-dasharray="6 4"/></g>`;
+  // furniture
+  if(showFurn){
+    for(const f of ROOM.furniture){
+      const rotLabel = f.ang===90||f.ang===-90 ? 0 : 0;
+      s+=`<g transform="translate(${f.cx*S} ${f.cz*S}) rotate(${f.ang})" opacity="${ghost?.6:1}">
+        <rect x="${-f.w*S/2}" y="${-f.d*S/2}" width="${f.w*S}" height="${f.d*S}" rx="${f.round?f.w*S/2:f.id==='table'||f.id==='shelf'?2:f.id.startsWith('light')?25:9}"
+          fill="${f.fill||(f.id.startsWith('light')?'#fff3c4':'var(--furn-fill)')}" stroke="${f.stroke||(f.id.startsWith('light')?'#d4a72c':'var(--furn)')}" stroke-width="1.2" ${f.id==='shelf'?'stroke-dasharray="4 3"':''}/>
+      </g>`;
+      const big = f.id==="table";
+      s+=`<text x="${f.cx*S}" y="${f.cz*S + (big?-4:0)}" text-anchor="middle" dominant-baseline="middle" font-size="${big?9:7.5}" fill="${f.labelColor||'#8f8775'}">${f.label}</text>`;
+      if(big) s+=`<text x="${f.cx*S}" y="${f.cz*S+10}" text-anchor="middle" font-size="8" font-family="ui-monospace,Menlo,monospace" fill="#8f8775">${fmt(f.w)} × ${fmt(f.d)}</text>`;
+    }
+  }
+  // wall labels
+  const lab=(x,y,txt,r=0)=>`<text x="${x}" y="${y}" transform="rotate(${r} ${x} ${y})" text-anchor="middle" font-size="8" letter-spacing=".12em" fill="#8b939c">${txt}</text>`;
+  if(OUT){
+    s+=lab((x0+x1)/2, z0-8, "↑ BOGART ST, AWAY FROM THE CORNER"); s+=lab((x0+x1)/2, z1+14, "CROSS STREET");
+    s+=lab(x0-8, (z0+z1)/2, "ALONG THE FACADE", -90); s+=lab(x1+14, (z0+z1)/2, "BOGART ST ROADWAY", 90);
+  } else {
+  s+=lab((x0+x1)/2, z0+14, "BACK WALL");
+  s+=lab(x0+14, (z0+z1)/2, "LEFT WALL", -90);
+  s+=lab(x1-14, (z0+z1)/2, "RIGHT WALL", 90);
+  s+=lab((x0+x1)/2, z1-8, ROOM.door ? "DOOR / FRONT" : "FRONT WALL", 0);
+  }
+  // shots
+  const active = shots.find(x=>x.id===activeId);
+  const others = showOthers ? shots.filter(x=>x!==active) : [];
+  const layer = (sh, isActive) => {
+    let g="", n=shots.indexOf(sh)+1;
+    if(sh.camera) g+=fovWedge(sh.camera, "var(--cam)", isActive? .09 : .035, cid);
+    if(sh.camera && sh.model && isActive){
+      const d=Math.hypot(sh.model.x-sh.camera.x, sh.model.z-sh.camera.z);
+      const mx=(sh.model.x+sh.camera.x)/2*S, mz=(sh.model.z+sh.camera.z)/2*S;
+      g+=`<line x1="${sh.camera.x*S}" y1="${sh.camera.z*S}" x2="${sh.model.x*S}" y2="${sh.model.z*S}" stroke="#1f2a37" stroke-width="1" stroke-dasharray="1 3"/>
+          <g transform="translate(${mx} ${mz})"><rect x="-27" y="-9" width="54" height="18" rx="9" fill="#1f2a37"/>
+          <text text-anchor="middle" dominant-baseline="central" font-size="8.5" font-family="ui-monospace,Menlo,monospace" fill="#fff">${fmt(d)}</text></g>`;
+    }
+    if(sh.model && isActive) g+=wallDistances(sh.model);
+    if(sh.camera) g+=cameraGlyph(sh.camera, n, isActive);
+    if(sh.model) g+=modelGlyph(sh.model, n, isActive);
+    return g;
+  };
+  for(const o of others) s+=layer(o,false);
+  if(active) s+=layer(active,true);
+  // dimensions
+  const dz=z0-t-32, dx=x0-t-32;
+  s+=dimLine(x0, dz, x1, dz, `${fmt(W)}${ROOM.outdoor?"":" interior"}`, -13);
+  s+=dimLine(dx, z0, dx, z1, `${fmt(D)}${ROOM.outdoor?"":" interior"}`, -13, true);
+  if(ROOM.door) s+=dimLine(ROOM.door.x0*S, z1+t+26, ROOM.door.x1*S, z1+t+26, `door ${fmt(ROOM.door.x1-ROOM.door.x0)}`, 13);
+  s+=`<text x="${x1+t}" y="${z1+t+52}" text-anchor="end" font-size="8.5" font-family="ui-monospace,Menlo,monospace" fill="#56616e">${ROOM.outdoor?"rebuilt from Street View + satellite":"ceiling "+fmt(ROOM.ceiling)} · grid 50 cm</text>`;
+  // scale bar 1 m
+  s+=`<g transform="translate(${x0-t} ${z1+t+46})"><rect width="50" height="5" fill="#1f2a37"/><rect x="50" width="50" height="5" fill="#fff" stroke="#1f2a37"/>
+     <text y="17" font-size="7.5" fill="#56616e" font-family="ui-monospace,Menlo,monospace">0</text><text x="100" y="17" text-anchor="middle" font-size="7.5" fill="#56616e" font-family="ui-monospace,Menlo,monospace">1 m</text></g>`;
+  return s;
+}
+
+const plan = document.getElementById("plan");
+function renderPlan(){
+  const vb=viewBox(); plan.setAttribute("viewBox", vb.join(" "));
+  plan.setAttribute("preserveAspectRatio","xMidYMid meet");
+  plan.innerHTML = planMarkup({shots:state.shots, activeId:state.selId, showOthers:state.showOthers, showFurn:state.showFurn});
+  plan.classList.toggle("placing", !!mode);
+}
+
+/* ---------------- Interaction on plan ---------------- */
+function svgPoint(e){
+  const p=plan.createSVGPoint(); p.x=e.clientX; p.y=e.clientY;
+  const q=p.matrixTransform(plan.getScreenCTM().inverse());
+  return { x:q.x/S, z:q.y/S };
+}
+plan.addEventListener("pointerdown", e=>{
+  const p=svgPoint(e);
+  if(mode){
+    if(!inside(p.x,p.z)) return;
+    const shot=state.shots.find(s=>s.id===mode.shotId); if(!shot) return endMode();
+    const x=snap(p.x), z=snap(p.z);
+    if(mode.step==="model"){
+      shot.model = shot.model ? Object.assign(shot.model,{x,z}) : defaultModel(x,z);
+      if(shot.camera){ aimCamera(shot); }
+      if(mode.single || shot.camera){ endMode(); }
+      else { mode.step="camera"; }
+    } else {
+      shot.camera = shot.camera ? Object.assign(shot.camera,{x,z}) : defaultCamera(x,z);
+      if(shot.model){
+        // model faces the camera by default the first time
+        if(!mode.single) shot.model.rot = deg(Math.atan2(z-shot.model.z, x-shot.model.x));
+        aimCamera(shot);
+      }
+      endMode();
+    }
+    save(); renderAll(); return;
+  }
+  const t=e.target.closest("[data-drag]"); if(!t) return;
+  const shot=sel(); if(!shot) return;
+  drag={kind:t.dataset.drag, shot};
+  plan.setPointerCapture(e.pointerId);
+  e.preventDefault();
+});
+plan.addEventListener("pointermove", e=>{
+  if(!drag) return;
+  const p=svgPoint(e), sh=drag.shot;
+  if(drag.kind==="model"){ sh.model.x=snap(clamp(p.x,IN.x0+.05,IN.x1-.05)); sh.model.z=snap(clamp(p.z,IN.z0+.05,IN.z1-.05)); aimCamera(sh); }
+  else if(drag.kind==="camera"){ sh.camera.x=snap(clamp(p.x,IN.x0+.03,IN.x1-.03)); sh.camera.z=snap(clamp(p.z,IN.z0+.03,IN.z1-.03)); aimCamera(sh); }
+  else if(drag.kind==="model-rot"){ sh.model.rot=Math.round(deg(Math.atan2(p.z-sh.model.z,p.x-sh.model.x))); }
+  else if(drag.kind==="camera-rot"){ sh.camera.rot=Math.round(deg(Math.atan2(p.z-sh.camera.z,p.x-sh.camera.x))); }
+  renderPlan(); renderList(); renderEditorLive(); schedulePreview();
+});
+const endDrag=()=>{ if(drag){ drag=null; save(); renderAll(); } };
+plan.addEventListener("pointerup", endDrag);
+plan.addEventListener("pointercancel", endDrag);
+
+function startMode(shotId, step, single){
+  mode={shotId, step, single:!!single};
+  state.selId=shotId; renderAll();
+}
+function endMode(){ mode=null; renderAll(); }
+document.getElementById("bannerCancel").onclick=()=>{
+  // cancelling a brand-new shot with nothing placed removes it
+  const sh=state.shots.find(s=>s.id===mode?.shotId);
+  if(sh && !sh.model && !sh.camera){ state.shots=state.shots.filter(s=>s!==sh); state.selId=state.shots.at(-1)?.id||null; }
+  save(); endMode();
+};
+document.addEventListener("keydown", e=>{ if(e.key==="Escape" && mode) document.getElementById("bannerCancel").click(); });
+
+function renderBanner(){
+  const b=document.getElementById("banner");
+  b.classList.toggle("show", !!mode);
+  if(!mode) return;
+  const sh=state.shots.find(s=>s.id===mode.shotId);
+  const isM = mode.step==="model";
+  document.getElementById("bannerDot").style.background = isM ? "var(--model)" : "var(--cam)";
+  document.getElementById("bannerText").textContent = `${sh?.name||"Shot"} — click on the plan where the ${isM?"model stands":"camera goes"}`;
+  document.getElementById("bannerStep").textContent = mode.single ? "" : (isM ? "step 1 of 2" : "step 2 of 2");
+}
+
+/* ---------------- Shot list ---------------- */
+function shotSummary(sh){
+  if(!sh.model && !sh.camera) return "not placed";
+  if(!sh.camera) return "model only";
+  if(!sh.model) return `camera only · ${sh.camera.focal}mm`;
+  const d=Math.hypot(sh.model.x-sh.camera.x, sh.model.z-sh.camera.z);
+  return `${sh.camera.focal}mm · ${fmt(d)} · ${sh.camera.orient==="portrait"?"portrait":"landscape"}`;
+}
+function issues(sh){
+  const out=[];
+  if(sh.model){ const f=hitFurniture(sh.model.x,sh.model.z,0.1); if(f) out.push(`Model overlaps the ${f.label.toLowerCase()}`); }
+  if(sh.camera){ const f=hitFurniture(sh.camera.x,sh.camera.z,0.05); if(f) out.push(`Camera overlaps the ${f.label.toLowerCase()}`); }
+  if(sh.camera && !ROOM.outdoor && sh.camera.height>ROOM.ceiling-0.1) out.push("Camera is above the ceiling height");
+  return out;
+}
+function renderList(){
+  const el=document.getElementById("shotList");
+  if(!state.shots.length){ el.innerHTML=`<div class="empty">No shots yet. Add one, then click the plan to pin the model and the camera.</div>`; return; }
+  el.innerHTML = state.shots.map((sh,i)=>`
+    <div class="shot ${sh.id===state.selId?"sel":""}" data-id="${sh.id}">
+      <div class="num">${i+1}</div>
+      <div><div class="nm">${esc(sh.name)}</div><div class="meta">${shotSummary(sh)}</div></div>
+      ${issues(sh).length?`<div class="flag" title="${esc(issues(sh).join("; "))}">⚠</div>`:""}
+    </div>`).join("");
+  el.querySelectorAll(".shot").forEach(n=>n.onclick=()=>{ if(mode) return; state.selId=n.dataset.id; save(); renderAll(); });
+}
+document.getElementById("addShot").onclick=()=>{
+  if(mode) return;
+  const sh=newShot(); state.shots.push(sh); save();
+  startMode(sh.id,"model",false);
+};
+
+/* ---------------- Editor ---------------- */
+const esc = s => String(s??"").replace(/[&<>"]/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+function num(id,val,step,min,max){ return `<input type="number" id="${id}" value="${val}" step="${step}" ${min!=null?`min="${min}"`:""} ${max!=null?`max="${max}"`:""}>`; }
+
+function renderEditor(){
+  const ed=document.getElementById("editor"), sh=sel();
+  if(!sh){ ed.innerHTML=""; return; }
+  const m=sh.model, c=sh.camera, u=uLabel(), st=state.units==="ft"?0.05:0.01;
+  let h=`<div class="sec">
+    <h2>Shot ${idx(sh)}</h2>
+    <div class="grid2">
+      <label class="fld full"><span>Name</span><input type="text" id="e-name" value="${esc(sh.name)}"></label>
+      <label class="fld full"><span>Notes (lighting, wardrobe, mood…)</span><textarea id="e-notes">${esc(sh.notes)}</textarea></label>
+    </div>
+  </div>`;
+  // Model
+  h+=`<div class="sec"><div class="who"><i style="background:var(--model)"></i>Model
+      <button class="btn small" id="pinModel">${m?"Re-pin":"Pin on plan"}</button></div>`;
+  if(m){
+    h+=`<div class="grid2">
+      <label class="fld"><span>From left wall (${u})</span>${num("m-x",toUnit(m.x-IN.x0),st,0)}</label>
+      <label class="fld"><span>From back wall (${u})</span>${num("m-z",toUnit(m.z-IN.z0),st,0)}</label>
+      <label class="fld"><span>Facing <span id="m-rot-v">${Math.round(norm360(m.rot))}°</span></span><input type="range" id="m-rot" min="0" max="359" value="${Math.round(norm360(m.rot))}"></label>
+      <label class="fld"><span>Model height (${u})</span>${num("m-h",toUnit(m.height),st,0.5)}</label>
+      <label class="fld full"><span>Pose / direction</span><input type="text" id="m-pose" value="${esc(m.pose)}" placeholder="e.g. seated on table edge, looking out the door"></label>
+    </div>`;
+  } else h+=`<div class="pending">Not pinned yet — click “Pin on plan”, then click where the model should stand.</div>`;
+  h+=`</div>`;
+  // Camera
+  h+=`<div class="sec"><div class="who"><i style="background:var(--cam)"></i>Camera
+      <button class="btn small" id="pinCam">${c?"Re-pin":"Pin on plan"}</button></div>`;
+  if(c){
+    const focalOpts = FOCALS.includes(+c.focal)?FOCALS:[...FOCALS,+c.focal].sort((a,b)=>a-b);
+    h+=`<div class="grid2">
+      <label class="fld"><span>From left wall (${u})</span>${num("c-x",toUnit(c.x-IN.x0),st,0)}</label>
+      <label class="fld"><span>From back wall (${u})</span>${num("c-z",toUnit(c.z-IN.z0),st,0)}</label>
+      <label class="fld"><span>Lens height (${u})</span>${num("c-h",toUnit(c.height),st,0.1)}</label>
+      <label class="fld"><span>Focal length (full-frame)</span><select id="c-f">${focalOpts.map(f=>`<option ${+c.focal===f?"selected":""} value="${f}">${f} mm</option>`).join("")}</select></label>
+      <label class="fld"><span>Orientation</span><select id="c-o"><option value="landscape" ${c.orient!=="portrait"?"selected":""}>Landscape 3:2</option><option value="portrait" ${c.orient==="portrait"?"selected":""}>Portrait 2:3</option></select></label>
+      <label class="fld"><span>Tilt <span id="c-t-v">${c.tilt}°</span></span><input type="range" id="c-t" min="-45" max="45" value="${c.tilt}"></label>
+      <label class="fld full"><span><label class="chk" style="color:inherit"><input type="checkbox" id="c-aim" ${c.aim?"checked":""} ${m?"":"disabled"}> Always point at the model</label></span></label>
+      <label class="fld full"><span>Direction <span id="c-rot-v">${Math.round(norm360(c.rot))}°</span></span><input type="range" id="c-rot" min="0" max="359" value="${Math.round(norm360(c.rot))}" ${c.aim&&m?"disabled":""}></label>
+    </div>`;
+  } else h+=`<div class="pending">Not pinned yet — click “Pin on plan”, then click where the camera goes.</div>`;
+  h+=`<div id="readout"></div></div>`;
+  // Preview
+  h+=`<div class="sec"><h2>Camera view</h2>
+    <div class="preview-wrap" id="pvWrap"><canvas id="preview"></canvas><div class="preview-msg" id="pvMsg">Loading 3D room…</div></div>
+    <div class="preview-cap"><span id="pvCap"></span><span>approx. framing</span></div>
+    <div class="row">
+      <button class="btn small" id="dupShot">Duplicate shot</button>
+      <button class="btn small danger" id="delShot">Delete shot</button>
+    </div>
+  </div>`;
+  ed.innerHTML=h;
+  bindEditor(sh);
+  renderReadout(sh);
+  Preview.attach(document.getElementById("preview"), document.getElementById("pvMsg"));
+  schedulePreview();
+}
+function renderEditorLive(){
+  // lightweight update while dragging: numbers + readout, no rebuild
+  const sh=sel(); if(!sh) return;
+  const set=(id,v)=>{ const n=document.getElementById(id); if(n && document.activeElement!==n) n.value=v; };
+  if(sh.model){ set("m-x",toUnit(sh.model.x-IN.x0)); set("m-z",toUnit(sh.model.z-IN.z0)); set("m-rot",Math.round(norm360(sh.model.rot)));
+    const v=document.getElementById("m-rot-v"); if(v) v.textContent=Math.round(norm360(sh.model.rot))+"°"; }
+  if(sh.camera){ set("c-x",toUnit(sh.camera.x-IN.x0)); set("c-z",toUnit(sh.camera.z-IN.z0)); set("c-rot",Math.round(norm360(sh.camera.rot)));
+    const v=document.getElementById("c-rot-v"); if(v) v.textContent=Math.round(norm360(sh.camera.rot))+"°"; }
+  renderReadout(sh);
+}
+function renderReadout(sh){
+  const el=document.getElementById("readout"); if(!el) return;
+  const m=sh.model,c=sh.camera; let h="";
+  if(c){
+    const hf=deg(hfov(c)), vf=deg(vfov(c));
+    h+=`<div class="readout" style="margin-top:10px">
+      <span>Field of view</span><b>${hf.toFixed(0)}° × ${vf.toFixed(0)}°</b>`;
+    if(m){
+      const d=Math.hypot(m.x-c.x,m.z-c.z);
+      const fw=2*d*Math.tan(hfov(c)/2), fh=2*d*Math.tan(vfov(c)/2);
+      // vertical coverage at subject plane (tilt included approximately)
+      const t=rad(c.tilt);
+      const top=c.height + d*Math.tan(t+vfov(c)/2), bot=c.height + d*Math.tan(t-vfov(c)/2);
+      let fit;
+      if(bot<=0.02 && top>=m.height) fit=`<b class="okc">full body fits</b>`;
+      else if(bot>0.02 && top>=m.height) fit=`<b>crops below ${fmt(bot,true)}</b>`;
+      else if(bot<=0.02) fit=`<b>crops above ${fmt(Math.max(top,0),true)}</b>`;
+      else fit=`<b>shows ${fmt(bot,true)} – ${fmt(top,true)}</b>`;
+      const rel = norm360(m.rot - (deg(Math.atan2(c.z-m.z,c.x-m.x))));
+      const relS = rel<=20||rel>=340 ? "facing camera" : rel>=160&&rel<=200 ? "back to camera" : (rel<180?"turned ~"+Math.round(rel)+"° right":"turned ~"+Math.round(360-rel)+"° left");
+      h+=`<span>Camera → model</span><b>${fmt(d)}</b>
+          <span>Frame at model</span><b>${fmt(fw)} wide × ${fmt(fh)} tall</b>
+          <span>Vertical</span>${fit}
+          <span>Model</span><b>${relS}</b>`;
+    }
+    h+=`</div>`;
+  }
+  const iss=issues(sh);
+  if(iss.length) h+=`<div class="warn">⚠ ${iss.join(" · ")}</div>`;
+  el.innerHTML=h;
+}
+function bindEditor(sh){
+  const $=id=>document.getElementById(id);
+  const commit=(rebuild)=>{ aimCamera(sh); save(); renderPlan(); renderList(); rebuild?renderEditor():renderReadout(sh); schedulePreview(); };
+  $("e-name").oninput=e=>{ sh.name=e.target.value; save(); renderList(); };
+  $("e-notes").oninput=e=>{ sh.notes=e.target.value; save(); };
+  $("pinModel").onclick=()=>startMode(sh.id,"model",true);
+  $("pinCam").onclick=()=>startMode(sh.id,"camera",true);
+  if(sh.model){
+    $("m-x").oninput=e=>{ const v=+e.target.value; if(!isNaN(v)){ sh.model.x=clamp(IN.x0+fromUnit(v),IN.x0,IN.x1); commit(); } };
+    $("m-z").oninput=e=>{ const v=+e.target.value; if(!isNaN(v)){ sh.model.z=clamp(IN.z0+fromUnit(v),IN.z0,IN.z1); commit(); } };
+    $("m-rot").oninput=e=>{ sh.model.rot=+e.target.value; $("m-rot-v").textContent=e.target.value+"°"; commit(); };
+    $("m-h").oninput=e=>{ const v=+e.target.value; if(v>0){ sh.model.height=fromUnit(v); commit(); } };
+    $("m-pose").oninput=e=>{ sh.model.pose=e.target.value; save(); };
+  }
+  if(sh.camera){
+    $("c-x").oninput=e=>{ const v=+e.target.value; if(!isNaN(v)){ sh.camera.x=clamp(IN.x0+fromUnit(v),IN.x0,IN.x1); commit(); } };
+    $("c-z").oninput=e=>{ const v=+e.target.value; if(!isNaN(v)){ sh.camera.z=clamp(IN.z0+fromUnit(v),IN.z0,IN.z1); commit(); } };
+    $("c-h").oninput=e=>{ const v=+e.target.value; if(v>0){ sh.camera.height=fromUnit(v); commit(); } };
+    $("c-f").onchange=e=>{ sh.camera.focal=+e.target.value; commit(); };
+    $("c-o").onchange=e=>{ sh.camera.orient=e.target.value; commit(); };
+    $("c-t").oninput=e=>{ sh.camera.tilt=+e.target.value; $("c-t-v").textContent=e.target.value+"°"; commit(); };
+    $("c-aim").onchange=e=>{ sh.camera.aim=e.target.checked; commit(true); };
+    $("c-rot").oninput=e=>{ sh.camera.rot=+e.target.value; $("c-rot-v").textContent=e.target.value+"°"; commit(); };
+  }
+  $("dupShot").onclick=()=>{
+    const cp=JSON.parse(JSON.stringify(sh)); cp.id=uid(); cp.name=sh.name+" (copy)";
+    state.shots.splice(state.shots.indexOf(sh)+1,0,cp); state.selId=cp.id; save(); renderAll();
+  };
+  $("delShot").onclick=()=>{
+    if(!confirm(`Delete “${sh.name}”?`)) return;
+    const i=state.shots.indexOf(sh); state.shots.splice(i,1);
+    state.selId=(state.shots[i]||state.shots[i-1]||{}).id||null; save(); renderAll();
+  };
+}
+
+/* ---------------- Header controls ---------------- */
+const shootId=document.getElementById("shootId"), photographer=document.getElementById("photographer"), shootWhen=document.getElementById("shootWhen");
+shootId.value=state.shoot.id; photographer.value=state.shoot.photographer; shootWhen.value=state.shoot.when;
+const setTitle=()=>{ document.title=(state.shoot.id?state.shoot.id+" — ":"")+"Shot Planner"; };
+shootId.oninput=()=>{ state.shoot.id=shootId.value; save(); setTitle(); };
+photographer.oninput=()=>{ state.shoot.photographer=photographer.value; save(); };
+shootWhen.onchange=()=>{ state.shoot.when=shootWhen.value; save(); };
+setTitle();
+document.getElementById("linkBtn").onclick=async e=>{
+  save(); const b=e.target;
+  try{ await navigator.clipboard.writeText(location.href); b.textContent="Copied ✓"; }catch(err){ b.textContent="Link is in the address bar"; }
+  setTimeout(()=>b.textContent="Copy link",1800);
+};
+const locSel=document.getElementById("locSel");
+locSel.innerHTML=Object.entries(ROOMS).map(([k,r])=>`<option value="${k}">${r.label}</option>`).join("");
+locSel.onchange=()=>{
+  if(mode) document.getElementById("bannerCancel").click();
+  state.byLoc[state.loc]={shots:state.shots, selId:state.selId};
+  state.loc=locSel.value;
+  const b=state.byLoc[state.loc]||{shots:[],selId:null};
+  state.shots=b.shots; state.selId=b.selId||b.shots[0]?.id||null;
+  applyRoom(); save(); renderAll(); Preview.setRoom();
+};
+document.querySelectorAll("#units button").forEach(b=>b.onclick=()=>{ state.units=b.dataset.u; save(); renderAll(); });
+document.getElementById("showFurn").onchange=e=>{ state.showFurn=e.target.checked; save(); renderAll(); };
+document.getElementById("showOthers").onchange=e=>{ state.showOthers=e.target.checked; save(); renderAll(); };
+document.getElementById("exportBtn").onclick=()=>{
+  const data={ shoot:state.shoot, room:ROOM.name, location:state.loc, units:"metres, origin = room centre, x→right, z→toward door", exported:new Date().toISOString(), shots:state.shots };
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:"application/json"}));
+  a.download=`shots-${new Date().toISOString().slice(0,10)}.json`; a.click();
+};
+document.getElementById("importBtn").onclick=()=>document.getElementById("importFile").click();
+document.getElementById("importFile").onchange=async e=>{
+  const f=e.target.files[0]; if(!f) return;
+  try{
+    const d=JSON.parse(await f.text()); const shots=Array.isArray(d)?d:d.shots;
+    if(!Array.isArray(shots)) throw new Error("no shots array");
+    state.shots=shots.map(s=>({id:s.id||uid(), name:s.name||"Shot", notes:s.notes||"", model:s.model||null, camera:s.camera||null}));
+    state.selId=state.shots[0]?.id||null; save(); renderAll();
+  }catch(err){ alert("Couldn't read that file: "+err.message); }
+  e.target.value="";
+};
+document.getElementById("printBtn").onclick=async ()=>{ await buildSheet(); window.print(); };
+
+async function buildSheet(){
+  const el=document.getElementById("sheet"), vb=viewBox().join(" ");
+  const pages=[];
+  for(const sh of state.shots){
+    const m=sh.model,c=sh.camera;
+    const rows=[];
+    if(m){ rows.push(["Model — from left / back wall", `${fmt(m.x-IN.x0)} / ${fmt(m.z-IN.z0)}`], ["Model facing", Math.round(norm360(m.rot))+"°"]);
+      if(m.pose) rows.push(["Pose", esc(m.pose)]); }
+    if(c){ rows.push(["Camera — from left / back wall", `${fmt(c.x-IN.x0)} / ${fmt(c.z-IN.z0)}`], ["Lens height", fmt(c.height)], ["Focal length", c.focal+" mm (full-frame)"], ["Orientation", c.orient], ["Tilt", c.tilt+"°"]); }
+    if(m&&c) rows.push(["Camera → model", fmt(Math.hypot(m.x-c.x,m.z-c.z))]);
+    if(sh.notes) rows.push(["Notes", esc(sh.notes).replace(/\n/g,"<br>")]);
+    let img="";
+    if(c){ try{ img = await Preview.snapshot(sh); }catch(e){} }
+    pages.push(`<div class="page"><h3>${idx(sh)}. ${esc(sh.name)}</h3>
+      <div style="color:#666;font-size:12px">${[state.shoot.id&&"Shoot "+esc(state.shoot.id), state.shoot.photographer&&esc(state.shoot.photographer), state.shoot.when&&esc(new Date(state.shoot.when).toLocaleString([], {dateStyle:"medium", timeStyle:"short"}))].filter(Boolean).join(" · ")}</div>
+      <div style="color:#666;font-size:12px;margin-bottom:10px">${ROOM.name} · ${fmt(W)} × ${fmt(D)} ${ROOM.outdoor?"":" · ceiling "+fmt(ROOM.ceiling)}</div>
+      <div class="pm"><svg viewBox="${vb}" xmlns="http://www.w3.org/2000/svg">${planMarkup({shots:state.shots,activeId:sh.id,showOthers:false,showFurn:state.showFurn,cid:"clip-"+sh.id})}</svg>
+      <div><table>${rows.map(r=>`<tr><td>${r[0]}</td><td>${r[1]}</td></tr>`).join("")}</table>${img?`<img src="${img}">`:""}</div></div></div>`);
+  }
+  el.innerHTML = pages.join("") || `<div class="page">No shots yet.</div>`;
+}
+
+/* ---------------- 3D preview bridge (filled in by the module below) ---------------- */
+window.Preview = { setRoom(){}, attach(cv,m){ if(window.Preview.failed && m) m.textContent=window.Preview.failed; }, update(){}, snapshot: async()=>"" , ready:false };
+let pvTimer=null;
+function schedulePreview(){ cancelAnimationFrame(pvTimer); pvTimer=requestAnimationFrame(()=>{ const sh=sel(); Preview.update(sh); updateCap(sh); }); }
+function updateCap(sh){
+  const el=document.getElementById("pvCap"); if(!el) return;
+  el.textContent = sh?.camera ? `${sh.camera.focal}mm · ${fmt(sh.camera.height)} high · ${sh.camera.orient}` : "pin the camera to see its view";
+}
+
+function renderRef(){
+  const el=document.getElementById("refSec"), r=ROOM.reference;
+  if(!r){ el.style.display="none"; el.innerHTML=""; return; }
+  el.style.display="";
+  el.innerHTML=`<h2>Reference</h2><img src="${r.src}" alt="Reference photo"><div class="cap">${esc(r.caption)} · click to enlarge</div>`;
+  el.querySelector("img").onclick=()=>{ const lb=document.getElementById("lightbox"); lb.querySelector("img").src=r.src; lb.classList.add("show"); };
+}
+document.getElementById("lightbox").onclick=e=>e.currentTarget.classList.remove("show");
+document.addEventListener("keydown",e=>{ if(e.key==="Escape") document.getElementById("lightbox").classList.remove("show"); });
+function renderAll(){
+  renderRef();
+  locSel.value=state.loc;
+  document.getElementById("roomSub").textContent = `${ROOM.name} · ${fmt(W)} × ${fmt(D)}${ROOM.outdoor?"":" · ceiling "+fmt(ROOM.ceiling)}`;
+  document.querySelectorAll("#units button").forEach(b=>b.classList.toggle("on", b.dataset.u===state.units));
+  document.getElementById("showFurn").checked=state.showFurn;
+  document.getElementById("showOthers").checked=state.showOthers;
+  renderBanner(); renderPlan(); renderList(); renderEditor();
+}
+if(state.selId && !sel()) state.selId=state.shots[0]?.id||null;
+state.shots.forEach(aimCamera);
+renderAll(); save();
+</script>
+
+<script type="module">
+/* 3D camera-view preview: renders the scanned room from the pinned camera. */
+let THREE, GLTFLoader;
+try{
+  THREE = await import("three");
+  ({ GLTFLoader } = await import("three/addons/loaders/GLTFLoader.js"));
+}catch(e){
+  window.Preview.failed = "3D preview needs an internet connection the first time (it loads three.js from a CDN). The plan works offline.";
+}
+
+const P = window.Preview;
+if(THREE){
+  const renderer = new THREE.WebGLRenderer({ antialias:true, preserveDrawingBuffer:true });
+  renderer.setPixelRatio(Math.min(2, window.devicePixelRatio||1));
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color("#2a2f36");
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x8a8070, 1.6));
+  const sun = new THREE.DirectionalLight(0xffffff, 1.1); sun.position.set(0.6, 2.3, 1.8); scene.add(sun);
+  const cam = new THREE.PerspectiveCamera(40, 1.5, 0.05, 30);
+
+  const matFor = name => {
+    if(/^Wall|^Joint/.test(name)) return new THREE.MeshStandardMaterial({ color:"#e8e4dc", roughness:.95, side:THREE.DoubleSide });
+    if(/^Floor/.test(name))       return new THREE.MeshStandardMaterial({ color:"#a79f92", roughness:.9, side:THREE.DoubleSide });
+    if(/^Ceiling/.test(name))     return new THREE.MeshStandardMaterial({ color:"#f3f1ec", roughness:1, side:THREE.DoubleSide });
+    if(/^Door/.test(name))        return new THREE.MeshStandardMaterial({ color:"#86aedb", transparent:true, opacity:.45, side:THREE.DoubleSide });
+    if(/table/.test(name))        return new THREE.MeshStandardMaterial({ color:"#a8794e", roughness:.7, side:THREE.DoubleSide });
+    if(/shelf/.test(name))        return new THREE.MeshStandardMaterial({ color:"#c9b69a", roughness:.8, side:THREE.DoubleSide });
+    return new THREE.MeshStandardMaterial({ color:"#4a4f58", roughness:.6, side:THREE.DoubleSide });
+  };
+
+  const room = new THREE.Group(); scene.add(room);
+  const studio = new THREE.Group(); scene.add(studio);
+  const furnitureNodes = [];
+  try{
+    const bin = Uint8Array.from(atob(window.ROOM_GLB_B64), c=>c.charCodeAt(0)).buffer;
+    const gltf = await new Promise((res,rej)=>new GLTFLoader().parse(bin, "", res, rej));
+    gltf.scene.traverse(o=>{
+      if(!o.isMesh) return;
+      // RoomPlan exports have no normals; compute them so lighting works
+      o.geometry.computeVertexNormals();
+      o.material = matFor(o.name);
+      o.material.flatShading = true;
+      if(!/^Wall|^Joint|^Floor|^Ceiling|^Door/.test(o.name)){
+        furnitureNodes.push(o);
+        const edges = new THREE.LineSegments(new THREE.EdgesGeometry(o.geometry, 30), new THREE.LineBasicMaterial({ color:0x1b1f24, transparent:true, opacity:.35 }));
+        o.add(edges);
+      }
+    });
+    room.add(gltf.scene);
+    gltf.scene.updateMatrixWorld(true);
+    // the scan leaves furniture ~17 cm above the floor — set it down
+    for(const o of furnitureNodes){ const b=new THREE.Box3().setFromObject(o); o.position.y -= b.min.y; }
+  }catch(e){ P.failed = "Couldn't load the room scan: "+e.message; }
+
+  // studio: plain white box + the two lights (no scan available)
+  {
+    const R=ROOMS.studio, I=R.interior, w=I.x1-I.x0, d=I.z1-I.z0;
+    const box = new THREE.Mesh(new THREE.BoxGeometry(w, R.ceiling, d),
+      new THREE.MeshStandardMaterial({ color:"#f4f3f0", roughness:1, side:THREE.BackSide }));
+    box.position.set(0, R.ceiling/2, 0); studio.add(box);
+    const floor = new THREE.Mesh(new THREE.PlaneGeometry(w, d), new THREE.MeshStandardMaterial({ color:"#e4e2dd", roughness:.9 }));
+    floor.rotation.x=-Math.PI/2; floor.position.y=0.002; studio.add(floor);
+    const dark = new THREE.MeshStandardMaterial({ color:"#2b2f36", roughness:.5 });
+    for(const f of R.furniture){
+      const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.015,0.015,f.h,8), dark); pole.position.set(f.cx, f.h/2, f.cz);
+      const head = new THREE.Mesh(new THREE.BoxGeometry(0.3,0.25,0.3), dark); head.position.set(f.cx, f.h, f.cz);
+      const base = new THREE.Mesh(new THREE.CylinderGeometry(0.25,0.25,0.02,16), dark); base.position.set(f.cx, 0.01, f.cz);
+      studio.add(pole, head, base);
+    }
+  }
+  // outdoor: the Bogart St corner, hand-built from a Street View frame (facade layout is eyeballed)
+  const outdoor = new THREE.Group(); scene.add(outdoor);
+  {
+    const R=ROOMS.outdoor, k=R.corner, c=R.curb, I=R.interior;
+    const std=(col,r=.9,extra={})=>new THREE.MeshStandardMaterial({ color:col, roughness:r, ...extra });
+    // ground
+    const road=new THREE.Mesh(new THREE.PlaneGeometry(120,120), std("#5d6064")); road.rotation.x=-Math.PI/2; outdoor.add(road);
+    // L-shaped sidewalk with rounded outer corner (shape y = -z, extruded up)
+    const sh=new THREE.Shape(); const F=60;
+    sh.moveTo(-F,F); sh.lineTo(c.x,F); sh.lineTo(c.x,-(c.z-c.r)); sh.absarc(c.x-c.r, -(c.z-c.r), c.r, 0, -Math.PI/2, true); sh.lineTo(-F,-c.z); sh.closePath();
+    const walk=new THREE.Mesh(new THREE.ExtrudeGeometry(sh,{ depth:0.15, bevelEnabled:false }), std("#cfcac0",.95));
+    walk.rotation.x=-Math.PI/2; outdoor.add(walk);
+    // crosswalk stripes
+    const cw=R.crosswalk, sw2=(cw.x1-cw.x0)/(cw.n*2-1);
+    for(let i=0;i<cw.n;i++){ const m=new THREE.Mesh(new THREE.PlaneGeometry(sw2,cw.z1-cw.z0), std("#f2f2f0",.8)); m.rotation.x=-Math.PI/2;
+      m.position.set(cw.x0+i*2*sw2+sw2/2, 0.01, (cw.z0+cw.z1)/2); outdoor.add(m); }
+    // building: tan block + brick-detail facades from a canvas texture (6 m module)
+    const bx0=-F, bz0=-F;
+    const bld=new THREE.Mesh(new THREE.BoxGeometry(k.x-bx0, 18, k.z-bz0), std("#cdb68a",1));
+    bld.position.set((bx0+k.x)/2, 9, (bz0+k.z)/2); outdoor.add(bld);
+    const facadeTex=(kind)=>{
+      const cv=document.createElement("canvas"); cv.width=600; cv.height=1000; const g=cv.getContext("2d");   // 100 px = 1 m, top = 10 m up
+      const Y=h=>1000-h*100;
+      g.fillStyle="#cdb68a"; g.fillRect(0,0,600,1000);
+      g.fillStyle="#8b5a45"; g.fillRect(0,Y(3.1),600,310);                                  // brown lower band
+      g.fillStyle="#7a4d3b"; g.fillRect(0,Y(3.1),600,10);
+      const frosted=(x,w)=>{ g.fillStyle="#bfc8ca"; g.fillRect(x,Y(1.9),w,150); g.strokeStyle="#8d969a"; g.lineWidth=2;
+        for(let i=1;i<4;i++){ g.beginPath(); g.moveTo(x+w*i/4,Y(1.9)); g.lineTo(x+w*i/4,Y(1.9)+150); g.stroke(); }
+        g.beginPath(); g.moveTo(x,Y(1.9)+75); g.lineTo(x+w,Y(1.9)+75); g.stroke(); g.strokeRect(x,Y(1.9),w,150); };
+      const steel=(x,y0,w,h,cols,rows)=>{ g.fillStyle="#d9dcdb"; g.fillRect(x,Y(y0+h),w,h*100);
+        g.strokeStyle="#2a2d30"; g.lineWidth=5; g.strokeRect(x,Y(y0+h),w,h*100); g.lineWidth=3;
+        for(let i=1;i<cols;i++){ g.beginPath(); g.moveTo(x+w*i/cols,Y(y0+h)); g.lineTo(x+w*i/cols,Y(y0)); g.stroke(); }
+        for(let j=1;j<rows;j++){ g.beginPath(); g.moveTo(x,Y(y0+h)+h*100*j/rows); g.lineTo(x+w,Y(y0+h)+h*100*j/rows); g.stroke(); } };
+      if(kind==="south"){            // the wide windowed facade
+        frosted(15,270); frosted(320,265);
+        steel(20,3.5,265,2.3,4,4); steel(315,3.5,265,2.3,4,4);
+        steel(20,6.7,265,2.3,4,4); steel(315,6.7,265,2.3,4,4);
+      } else {                       // Bogart St side: narrow tall window columns
+        frosted(10,280); frosted(310,280);
+        for(const x of [30,230,430]){ steel(x,3.5,110,2.3,2,4); steel(x,6.7,110,2.3,2,4); }
+      }
+      const t=new THREE.CanvasTexture(cv); t.colorSpace=THREE.SRGBColorSpace; t.wrapS=THREE.RepeatWrapping; t.anisotropy=4; return t;
+    };
+    const faceS=new THREE.Mesh(new THREE.PlaneGeometry(k.x-bx0,10), new THREE.MeshBasicMaterial({ map:facadeTex("south") }));
+    faceS.material.map.repeat.set((k.x-bx0)/6,1); faceS.position.set((bx0+k.x)/2, 5, k.z+0.02); outdoor.add(faceS);
+    const faceE=new THREE.Mesh(new THREE.PlaneGeometry(k.z-bz0,10), new THREE.MeshBasicMaterial({ map:facadeTex("east") }));
+    faceE.material.map.repeat.set((k.z-bz0)/6,1); faceE.rotation.y=Math.PI/2; faceE.position.set(k.x+0.02, 5, (bz0+k.z)/2); outdoor.add(faceE);
+    // signed utility pole
+    const grey=std("#8a8d90",.6), P=R.furniture.find(f=>f.id==="pole");
+    const pole=new THREE.Mesh(new THREE.CylinderGeometry(.09,.11,P.h,12), grey); pole.position.set(P.cx,P.h/2,P.cz); outdoor.add(pole);
+    const base=new THREE.Mesh(new THREE.CylinderGeometry(.16,.18,.9,12), grey); base.position.set(P.cx,.45,P.cz); outdoor.add(base);
+    const plate=(w,h,col,x,y,z,ry)=>{ const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,.03), std(col,.5)); m.position.set(x,y,z); m.rotation.y=ry||0; outdoor.add(m); return m; };
+    plate(.8,.2,"#1f6b3a", P.cx+.1, 4.2, P.cz, Math.PI/2);                 // "Bogart St" street-name plate
+    plate(.8,.28,"#111111", P.cx, 3.6, P.cz+.12, 0);  plate(.8,.28,"#111111", P.cx+.12, 3.25, P.cz, Math.PI/2);   // ONE WAY signs
+    const strip=new THREE.Mesh(new THREE.CylinderGeometry(.095,.095,1.6,12), std("#c8c2b4",1)); strip.position.set(P.cx,1.7,P.cz); outdoor.add(strip); // sticker-covered section
+    // drain grate, shrubs
+    const D=R.furniture.find(f=>f.id==="drain"); const dr=new THREE.Mesh(new THREE.PlaneGeometry(D.w,D.d), std("#2a2d30",.7)); dr.rotation.x=-Math.PI/2; dr.position.set(D.cx,.012,D.cz); outdoor.add(dr);
+    const Sh=R.furniture.find(f=>f.id==="shrub");
+    for(const [dx,dz,r] of [[0,-.7,.6],[.1,0,.7],[-.1,.7,.55],[0,1.0,.45]]){ const b=new THREE.Mesh(new THREE.SphereGeometry(r,14,10), std("#4d7a3a",1)); b.position.set(Sh.cx+dx,.15+r*.8,Sh.cz+dz); b.scale.y=.85; outdoor.add(b); }
+    // scenery further up Bogart St (outside the 8 m window): white box truck, parked cars, street tree
+    const box=(w,h,d,col,x,y,z)=>{ const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d), std(col,.6)); m.position.set(x,y,z); outdoor.add(m); return m; };
+    box(2.4,2.8,4.6,"#f1f1ef", 3.9,2.0,-9);  box(2.2,1.6,1.7,"#e2e2df", 3.9,1.3,-6.0);          // box truck
+    box(1.8,.7,4.4,"#d9dcde", 3.6,.7,-12.5); box(1.6,.55,2.2,"#2b3138", 3.6,1.3,-12.5);          // white car
+    box(2.4,2.8,5.2,"#25262a", 3.9,2.0,-16);                                                      // graffiti truck
+    const tr=new THREE.Mesh(new THREE.CylinderGeometry(.18,.22,4,10), std("#5a4631")); tr.position.set(5.3,2,-14); outdoor.add(tr);
+    const cr=new THREE.Mesh(new THREE.SphereGeometry(2.6,20,14), std("#4f7a3c")); cr.position.set(5.3,5.6,-14); outdoor.add(cr);
+  }
+  function setRoom(){
+    const k=state.loc; studio.visible=k==="studio"; room.visible=k==="booth"; outdoor.visible=k==="outdoor"; grid.visible=k==="booth";
+    scene.background=new THREE.Color(k==="outdoor"?"#cfd3d6":"#2a2f36"); cam.far=k==="outdoor"?120:30; draw();
+  }
+
+  // a 1 m floor grid to judge distance in the view
+  const grid = new THREE.GridHelper(4, 8, 0x6d665b, 0x8c8577); grid.position.y=0.003; grid.material.transparent=true; grid.material.opacity=.35; scene.add(grid);
+
+  // mannequin
+  const fig = new THREE.Group(); scene.add(fig);
+  const skin = new THREE.MeshStandardMaterial({ color:"#e0503a", roughness:.6 });
+  const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.17, 0.95, 6, 16), skin); body.position.y=0.17+0.475+0.18; body.scale.set(0.62,1,1);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.105, 20, 16), skin); head.position.y=1.58;
+  const nose = new THREE.Mesh(new THREE.ConeGeometry(0.035, 0.09, 12), new THREE.MeshStandardMaterial({ color:"#ffffff" })); nose.rotation.z=-Math.PI/2; nose.position.set(0.12,1.58,0);
+  const legs = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.8, 0.26), skin); legs.position.y=0.4;
+  fig.add(body, head, nose, legs);
+
+  let canvas=null, msg=null, current=null;
+
+  function aspect(sh){ return sh?.camera?.orient==="portrait" ? 2/3 : 3/2; }
+  function place(sh){
+    const c=sh.camera, m=sh.model;
+    const sw = c.orient==="portrait"?24:36, shh = c.orient==="portrait"?36:24;
+    cam.fov = 2*Math.atan(shh/(2*c.focal))*180/Math.PI;
+    cam.aspect = sw/shh; cam.updateProjectionMatrix();
+    cam.position.set(c.x, c.height, c.z);
+    const r=c.rot*Math.PI/180, t=c.tilt*Math.PI/180;
+    cam.lookAt(c.x+Math.cos(r)*Math.cos(t), c.height+Math.sin(t), c.z+Math.sin(r)*Math.cos(t));
+    fig.visible = !!m;
+    if(m){ fig.position.set(m.x,0,m.z); fig.rotation.y = -m.rot*Math.PI/180; const s=m.height/1.70; fig.scale.set(s,s,s); }
+  }
+  function draw(){
+    if(!canvas) return;
+    if(P.failed){ msg.textContent=P.failed; msg.style.display="grid"; return; }
+    const sh=current;
+    if(!sh?.camera){ msg.textContent="Pin the camera to see what it sees."; msg.style.display="grid"; canvas.style.visibility="hidden"; return; }
+    msg.style.display="none"; canvas.style.visibility="visible";
+    const w = canvas.parentElement.clientWidth || 340, a=aspect(sh);
+    const h = Math.round(Math.min(w/a, 420)); const ww = Math.round(h*a);
+    renderer.setSize(ww, h, false); canvas.style.width = ww+"px"; canvas.style.height=h+"px"; canvas.style.margin="0 auto";
+    place(sh); renderer.render(scene, cam);
+  }
+  P.attach = (cv, m) => {
+    canvas = cv; msg = m;
+    // swap our renderer's canvas in
+    cv.replaceWith(renderer.domElement); renderer.domElement.id="preview"; canvas=renderer.domElement;
+    draw();
+  };
+  P.setRoom = setRoom; setRoom();
+  P.update = sh => { current = sh; draw(); };
+  P.snapshot = async sh => {
+    if(!sh?.camera || P.failed) return "";
+    const a=aspect(sh), h=400, w=Math.round(h*a);
+    const prev=current; renderer.setSize(w,h,false); place(sh); renderer.render(scene,cam);
+    const url=renderer.domElement.toDataURL("image/jpeg",.85); current=prev; draw(); return url;
+  };
+  P.ready = true;
+  window.addEventListener("resize", draw);
+}
+// re-render whatever is showing now that the module has loaded
+const pv=document.getElementById("preview"), pm=document.getElementById("pvMsg");
+if(pv && pm){ P.attach(pv, pm); }
+if(pm && P.failed && !THREE){ pm.textContent = P.failed; }
+window.dispatchEvent(new Event("preview-ready"));
+</script>
+<script>
+  // once the 3D module is ready, draw the current shot
+  window.addEventListener("preview-ready", ()=>{ schedulePreview(); });
+</script>
+</body>
+</html>
