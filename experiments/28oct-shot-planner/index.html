@@ -40,6 +40,12 @@
   .banner .dot{width:12px;height:12px;border-radius:50%}
   .banner .btn{margin-left:auto;background:transparent;color:#fff;border-color:rgba(255,255,255,.35)}
   #plan{flex:1;min-height:0;width:100%;display:block;touch-action:none}
+  .sunbar{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;margin:10px 16px 0;padding:7px 10px;border:1px solid var(--line);border-radius:9px;background:#fff;font-size:12px}
+  .sunbar input[type=range]{flex:1;min-width:140px;width:auto}
+  .sunbar input[type=date],.sunbar select{border:1px solid var(--line);border-radius:6px;padding:3px 6px;background:#fff}
+  .sunbar #sunLive.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+  .sunbar .clock{font-family:var(--mono);min-width:96px}
+  .sunbar .info{flex-basis:100%;display:flex;flex-wrap:wrap;gap:2px 14px;color:var(--ink-2)}
   #orbitWrap{flex:1;min-height:0;position:relative} #orbitWrap canvas{display:block;width:100%;height:100%;touch-action:none}
   #plan.placing{cursor:crosshair}
   .legend{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:12px;color:var(--ink-2);padding:6px 16px 12px}
@@ -144,6 +150,16 @@
       <span class="step" id="bannerStep"></span>
       <button class="btn small" id="bannerCancel">Cancel</button>
     </div>
+    <div class="sunbar" id="sunbar" style="display:none">
+      <span title="Sun simulation for 56 Bogart St, New York time">☀︎ Sun</span>
+      <button class="btn small" id="sunLive" title="Follow the current time in New York">Live</button>
+      <input type="date" id="sunDate">
+      <input type="range" id="sunTime" min="0" max="1435" step="5" title="Time of day (New York)">
+      <span class="clock" id="sunClock"></span>
+      <button class="btn small" id="sunShoot" title="Jump to the shoot date &amp; time set at the top">Shoot time</button>
+      <label>Wall faces <select id="wallFacing" title="Compass direction the wall faces (stand with your back to the wall and check a compass app)"></select></label>
+      <div class="info"><span id="sunInfo"></span><span id="sunDayInfo"></span></div>
+    </div>
     <svg id="plan" xmlns="http://www.w3.org/2000/svg"></svg>
     <div id="orbitWrap" style="display:none"></div>
     <div class="legend">
@@ -222,6 +238,8 @@ ROOMS.outdoor = {
   ceiling: 60,
   door: null,
   source: "LiDAR scan 31 Oct 2026",
+  geo: { lat:40.7058, lon:-73.9332 },   // 56 Bogart St, for the sun
+  wallFacing: 247.5, // compass bearing (WSW) the wall faces (plan +z). NOT VERIFIED — the scan has no compass; set it on the sun bar
   reference: { src:"ref/56-bogart-scan-wall.jpg", caption:"The wall seen from the sidewalk (render of the scan, 31 Oct 2026) — skull graffiti left, Hershey's mural right" },
   scan: { wallX:3.32, groundY:-2.18,                                                  // scan → plan, same as scan-prep.py
           top:{ src:"ref/56-bogart-scan-top.jpg", x0:-10.18, x1:10.20, z0:-1.64, z1:8.28 } },  // orthophoto extents (printed by scan-prep.py)
@@ -242,6 +260,8 @@ const FOCALS = [14,16,20,24,28,35,50,85,105,135];
 let state = load() || { shots:[], selId:null, units:"m", showFurn:true, showOthers:true };
 if(!ROOMS[state.loc]){ state.loc="booth"; }
 state.byLoc = state.byLoc || {};
+state.sun = state.sun || { live:true, date:"", min:720 };   // outdoor sun: live (now in New York) or a picked date + minute of day
+if(state.sun.facing==null) state.sun.facing = ROOMS.outdoor.wallFacing;
 state.shoot = state.shoot || { id:"", photographer:"", when:"" };   // shots of the locations that aren't currently open
 state.shoot.id = state.shoot.id || ""; state.shoot.photographer = state.shoot.photographer || "";
 applyRoom();
@@ -305,6 +325,58 @@ function fmt(m, short){
 function toUnit(m){ return state.units==="ft" ? +(m/0.3048).toFixed(2) : +m.toFixed(2); }
 function fromUnit(v){ return state.units==="ft" ? v*0.3048 : v; }
 const uLabel = () => state.units==="ft" ? "ft" : "m";
+
+/* ---------------- Sun (outdoor) ----------------
+   Where the sun is over the location at a New York time, live or picked on the sun bar. Low-precision solar
+   ephemeris (the SunCalc formulas), good to well under a degree. */
+const TZ = "America/New_York";
+const COMPASS = ["N","NNE","NE","ENE","E","ESE","SE","SSE","S","SSW","SW","WSW","W","WNW","NW","NNW"];
+const compass = d => COMPASS[Math.round(norm360(d)/22.5)%16];
+function sunPosition(ms, lat, lon){   // → altitude above the horizon and azimuth clockwise from north, degrees
+  const r=Math.PI/180, d=ms/864e5-10957.5;   // days since J2000
+  const M=r*(357.5291+0.98560028*d), C=r*(1.9148*Math.sin(M)+0.02*Math.sin(2*M)+0.0003*Math.sin(3*M));
+  const L=M+C+r*102.9372+Math.PI, e=r*23.4397;
+  const dec=Math.asin(Math.sin(e)*Math.sin(L)), ra=Math.atan2(Math.sin(L)*Math.cos(e), Math.cos(L));
+  const H=r*(280.16+360.9856235*d)+lon*r-ra, phi=lat*r;
+  const alt=Math.asin(Math.sin(phi)*Math.sin(dec)+Math.cos(phi)*Math.cos(dec)*Math.cos(H));
+  const az=Math.atan2(Math.sin(H), Math.cos(H)*Math.sin(phi)-Math.tan(dec)*Math.cos(phi));
+  return { alt:alt/r, az:norm360(az/r+180) };
+}
+const nyFmt = new Intl.DateTimeFormat("en-US", { timeZone:TZ, hourCycle:"h23", year:"numeric", month:"2-digit", day:"2-digit", hour:"2-digit", minute:"2-digit" });
+function nyParts(ms){
+  const p=Object.fromEntries(nyFmt.formatToParts(ms).map(x=>[x.type,x.value]));
+  return { date:`${p.year}-${p.month}-${p.day}`, min:+p.hour*60 + +p.minute };
+}
+function nyToMs(date, min){   // New York wall-clock time → instant
+  const [y,m,d]=date.split("-").map(Number), want=Date.UTC(y,m-1,d,0,min);
+  let ms=want+5*36e5;
+  for(let i=0;i<2;i++){ const p=nyParts(ms), [py,pm,pd]=p.date.split("-").map(Number); ms+=want-Date.UTC(py,pm-1,pd,0,p.min); }
+  return ms;
+}
+// unit vector toward the sun in plan axes (y up, +z = the way the wall faces)
+function sunVector(p){
+  const a=rad(p.az-state.sun.facing), h=rad(p.alt);
+  return { x:-Math.sin(a)*Math.cos(h), y:Math.sin(h), z:Math.cos(a)*Math.cos(h) };
+}
+function sunNow(){
+  const s=state.sun, g=ROOMS.outdoor.geo, ms=s.live ? Date.now() : nyToMs(s.date, s.min), p=sunPosition(ms, g.lat, g.lon);
+  return { ms, ...p, v:sunVector(p) };
+}
+function fmtClock(min){ const h=Math.floor(min/60)%24, m=min%60; return `${(h+11)%12+1}:${String(m).padStart(2,"0")} ${h<12?"am":"pm"}`; }
+// sunrise, sunset and the stretches when sun falls on the wall face, for one New York day (2-minute steps)
+let sunDayCache=null;
+function sunDay(date){
+  const key=date+"|"+state.sun.facing;
+  if(sunDayCache?.key===key) return sunDayCache;
+  const g=ROOMS.outdoor.geo; let rise=null, set=null, cur=null; const onWall=[];
+  for(let m=0;m<1440;m+=2){
+    const p=sunPosition(nyToMs(date,m), g.lat, g.lon), up=p.alt>-0.83, lit=p.alt>0 && sunVector(p).z>0;
+    if(up && rise===null) rise=m;
+    if(!up && rise!==null && set===null) set=m;
+    if(lit){ if(!cur) onWall.push(cur=[m,m]); cur[1]=m; } else cur=null;
+  }
+  return sunDayCache={ key, rise, set, onWall };
+}
 
 /* ---------------- Plan rendering ---------------- */
 function viewBox(){ const m=0.55, top=0.68, bot=0.82; return [(IN.x0-m)*S, (IN.z0-top)*S, (W+2*m)*S, (D+top+bot)*S]; }
@@ -430,6 +502,17 @@ function planMarkup(opts){
     }
     s+=`<text x="${x1-6}" y="${ROOM.curb.z*S-5}" text-anchor="end" font-size="8" letter-spacing=".12em" fill="#fff" paint-order="stroke" stroke="#1f2a37" stroke-width="3">CURB · ${fmt(ROOM.curb.z)} FROM WALL</text>`;
     s+=lab((x0+x1)/2, z1+14, "PARKING LANE (CARS HERE ON SCAN DAY) · ROADWAY BEYOND");
+    // compass: north, and the sun (arrow points toward it)
+    const B=rad(state.sun.facing), R=32, cx=x1-R-12, cy=z1-R-12, p=sunNow(), hl=Math.hypot(p.v.x,p.v.z)||1;
+    const nx=Math.sin(B), nz=Math.cos(B), ux=p.v.x/hl, uz=p.v.z/hl;
+    s+=`<g font-family="ui-monospace,Menlo,monospace" font-size="8" text-anchor="middle" dominant-baseline="central">
+      <circle cx="${cx}" cy="${cy}" r="${R}" fill="#fff" fill-opacity=".88" stroke="#1f2a37"/>
+      <line x1="${cx-nx*R*.6}" y1="${cy-nz*R*.6}" x2="${cx+nx*R*.6}" y2="${cy+nz*R*.6}" stroke="#1f2a37" stroke-width="1.5"/>
+      <text x="${cx+nx*R*.8}" y="${cy+nz*R*.8}" font-weight="700" fill="#1f2a37">N</text>
+      ${p.alt>0 ? `<line x1="${cx}" y1="${cy}" x2="${cx+ux*R*.62}" y2="${cy+uz*R*.62}" stroke="#d99a00" stroke-width="2"/>
+        <circle cx="${cx+ux*R*.62}" cy="${cy+uz*R*.62}" r="5.5" fill="#f5b800" stroke="#fff"/>`
+        : `<text x="${cx}" y="${cy+R*.35}" fill="#56616e">sun down</text>`}
+    </g>`;
   } else {
   s+=lab((x0+x1)/2, z0+14, "BACK WALL");
   s+=lab(x0+14, (z0+z1)/2, "LEFT WALL", -90);
@@ -752,6 +835,37 @@ function renderView(){
   Preview.setOrbit(view==="3d");
 }
 document.querySelectorAll("#viewSeg button").forEach(b=>b.onclick=()=>{ view=b.dataset.v; renderView(); });
+
+/* Sun bar (outdoor): live, or a picked New York date + time; drives the 3D light and the plan compass */
+const sunDate=document.getElementById("sunDate"), sunTime=document.getElementById("sunTime"), wallFacing=document.getElementById("wallFacing");
+wallFacing.innerHTML=COMPASS.map((c,i)=>`<option value="${i*22.5}">${c} (${i*22.5}°)</option>`).join("");
+function renderSun(){
+  const bar=document.getElementById("sunbar"), s=state.sun;
+  bar.style.display = ROOM.outdoor ? "" : "none";
+  if(!ROOM.outdoor) return;
+  if(s.live || !s.date) Object.assign(s, nyParts(Date.now()));
+  sunDate.value=s.date; sunTime.value=s.min; wallFacing.value=s.facing;
+  document.getElementById("sunLive").classList.toggle("on", s.live);
+  document.getElementById("sunClock").textContent = fmtClock(s.min) + (s.live ? " · now" : "");
+  const p=sunNow(), d=sunDay(s.date);
+  document.getElementById("sunInfo").textContent = p.alt<=0 ? "Sun is below the horizon"
+    : `Sun ${Math.round(p.alt)}° up, from the ${compass(p.az)} · ${p.v.z>0 ? "shining on the wall" : "wall in shade (sun is behind it)"}`;
+  const wall = d.onWall.length ? d.onWall.map(([a,b])=>`${fmtClock(a)}–${fmtClock(b)}`).join(", ") : "not at all";
+  document.getElementById("sunDayInfo").textContent = `Sunrise ${d.rise!=null?fmtClock(d.rise):"—"} · sunset ${d.set!=null?fmtClock(d.set):"—"} · sun on the wall ${wall} (ignores shade from buildings that aren't in the scan)`;
+}
+function sunChanged(){ save(); renderSun(); renderPlan(); schedulePreview(); }
+document.getElementById("sunLive").onclick=()=>{ state.sun.live=!state.sun.live; sunChanged(); };
+sunDate.onchange=()=>{ if(!sunDate.value) return; state.sun.live=false; state.sun.date=sunDate.value; sunChanged(); };
+sunTime.oninput=()=>{ state.sun.live=false; state.sun.min=+sunTime.value; sunChanged(); };
+wallFacing.onchange=()=>{ state.sun.facing=+wallFacing.value; sunChanged(); };
+document.getElementById("sunShoot").onclick=()=>{
+  const w=state.shoot.when;   // "YYYY-MM-DDTHH:MM", taken as New York time
+  if(!w){ alert("Set the shoot date & time at the top first."); return; }
+  const [date,t]=w.split("T"), [h,m]=t.split(":").map(Number);
+  Object.assign(state.sun, { live:false, date, min:h*60+m }); sunChanged();
+};
+// live: follow the clock
+setInterval(()=>{ if(ROOM.outdoor && state.sun.live){ renderSun(); renderPlan(); schedulePreview(); } }, 30000);
 document.querySelectorAll("#units button").forEach(b=>b.onclick=()=>{ state.units=b.dataset.u; save(); renderAll(); });
 document.getElementById("showFurn").onchange=e=>{ state.showFurn=e.target.checked; save(); renderAll(); };
 document.getElementById("showOthers").onchange=e=>{ state.showOthers=e.target.checked; save(); renderAll(); };
@@ -784,6 +898,8 @@ async function buildSheet(){
       if(m.pose) rows.push(["Pose", esc(m.pose)]); }
     if(c){ rows.push(["Camera — from left / back wall", `${fmt(c.x-IN.x0)} / ${fmt(c.z-IN.z0)}`], ["Lens height", fmt(c.height)], ["Focal length", c.focal+" mm (full-frame)"], ["Orientation", c.orient], ["Tilt", c.tilt+"°"]); }
     if(m&&c) rows.push(["Camera → model", fmt(Math.hypot(m.x-c.x,m.z-c.z))]);
+    if(ROOM.outdoor){ const p=sunNow(), t=nyParts(p.ms);
+      rows.push(["Sun (simulated)", `${t.date} ${fmtClock(t.min)} New York · ${p.alt>0 ? `${Math.round(p.alt)}° up from the ${compass(p.az)}, ${p.v.z>0?"on the wall":"wall in shade"}` : "below the horizon"}`]); }
     if(sh.notes) rows.push(["Notes", esc(sh.notes).replace(/\n/g,"<br>")]);
     let img="";
     if(c){ try{ img = await Preview.snapshot(sh); }catch(e){} }
@@ -815,7 +931,7 @@ function renderRef(){
 document.getElementById("lightbox").onclick=e=>e.currentTarget.classList.remove("show");
 document.addEventListener("keydown",e=>{ if(e.key==="Escape") document.getElementById("lightbox").classList.remove("show"); });
 function renderAll(){
-  renderRef();
+  renderRef(); renderSun();
   locSel.value=state.loc;
   document.getElementById("roomSub").textContent = `${ROOM.name} · ${fmt(W)} × ${fmt(D)}${ROOM.outdoor?"":" · ceiling "+fmt(ROOM.ceiling)}`;
   document.querySelectorAll("#units button").forEach(b=>b.classList.toggle("on", b.dataset.u===state.units));
@@ -846,8 +962,11 @@ if(THREE){
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   const scene = new THREE.Scene();
   scene.background = new THREE.Color("#2a2f36");
-  scene.add(new THREE.HemisphereLight(0xffffff, 0x8a8070, 1.6));
-  const sun = new THREE.DirectionalLight(0xffffff, 1.1); sun.position.set(0.6, 2.3, 1.8); scene.add(sun);
+  renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  // indoor lights; outdoors the simulated sun takes over (see updateSun)
+  const indoorLights = new THREE.Group(); scene.add(indoorLights);
+  indoorLights.add(new THREE.HemisphereLight(0xffffff, 0x8a8070, 1.6));
+  const sun = new THREE.DirectionalLight(0xffffff, 1.1); sun.position.set(0.6, 2.3, 1.8); indoorLights.add(sun);
   const cam = new THREE.PerspectiveCamera(40, 1.5, 0.05, 30);
 
   const matFor = name => {
@@ -903,18 +1022,31 @@ if(THREE){
   // outdoor: the LiDAR scan of the wall at 56 Bogart St, placed in plan coordinates
   const outdoor = new THREE.Group(); scene.add(outdoor);
   let groundAt = () => 0;
+  const sky = new THREE.HemisphereLight(0xdfe8f2, 0x6b675f, 1); outdoor.add(sky);
+  const sunLight = new THREE.DirectionalLight(0xffffff, 2); sunLight.castShadow = true;
+  {
+    const sh=sunLight.shadow, sc=sh.camera, I=ROOMS.outdoor.interior;
+    sh.mapSize.set(2048,2048); sc.left=sc.bottom=-15; sc.right=sc.top=15; sc.near=1; sc.far=90;
+    sh.bias=-0.0004; sh.normalBias=0.04;
+    sunLight.target.position.set((I.x0+I.x1)/2, 0, (I.z0+I.z1)/2); outdoor.add(sunLight, sunLight.target);
+  }
   {
     const R=ROOMS.outdoor, m=R.scan;
     // flat stand-in at road level under the scan, so holes (and the street the cars hid) aren't empty sky
-    const road=new THREE.Mesh(new THREE.PlaneGeometry(200,200), new THREE.MeshBasicMaterial({ color:"#76797d" }));
-    road.rotation.x=-Math.PI/2; road.position.y=-R.curb.h-0.15; outdoor.add(road);
+    const road=new THREE.Mesh(new THREE.PlaneGeometry(200,200), new THREE.MeshLambertMaterial({ color:"#76797d" }));
+    road.rotation.x=-Math.PI/2; road.receiveShadow=true; road.position.y=-R.curb.h-0.15; outdoor.add(road);
     try{
       const bin = Uint8Array.from(atob(window.OUTDOOR_GLB_B64), c=>c.charCodeAt(0)).buffer;
       const gltf = await new Promise((res,rej)=>new GLTFLoader().parse(bin, "", res, rej));
       // scan → plan: x = scan z, z = wallX − scan x, y = scan y − groundY
       gltf.scene.rotation.y = Math.PI/2; gltf.scene.position.set(0, -m.groundY, m.wallX);
-      // daylight is baked into the texture, so draw it unlit
-      gltf.scene.traverse(o=>{ if(o.isMesh) o.material = new THREE.MeshBasicMaterial({ map:o.material.map, side:THREE.DoubleSide }); });
+      // lit by the simulated sun (the texture still carries the scan day's light; the scan has no normals)
+      gltf.scene.traverse(o=>{
+        if(!o.isMesh) return;
+        o.geometry.computeVertexNormals();
+        o.material = new THREE.MeshLambertMaterial({ map:o.material.map, side:THREE.DoubleSide });
+        o.castShadow = o.receiveShadow = true;
+      });
       outdoor.add(gltf.scene); outdoor.updateMatrixWorld(true);
       groundAt = groundGrid(gltf.scene);
     }catch(e){ P.failed = "Couldn't load the outdoor scan: "+e.message; }
@@ -940,8 +1072,23 @@ if(THREE){
       return 0;
     };
   }
+  // sun light, sky light and sky colour for the simulated time (sunNow, in the plan script)
+  const SKY_NIGHT=new THREE.Color("#0e1522"), SKY_DUSK=new THREE.Color("#5b6a86"), SKY_DAY=new THREE.Color("#c9d7e4");
+  const SUN_LOW=new THREE.Color("#ffb070"), SUN_HIGH=new THREE.Color("#fff6e8");
+  const ramp=(v,a,b)=>clamp((v-a)/(b-a),0,1);
+  function updateSun(){
+    if(!outdoor.visible) return;
+    const p=sunNow();
+    sunLight.visible = p.alt>0;
+    sunLight.position.copy(sunLight.target.position).addScaledVector(new THREE.Vector3(p.v.x,p.v.y,p.v.z), 45);
+    sunLight.color.copy(SUN_LOW).lerp(SUN_HIGH, ramp(p.alt,2,25));
+    sunLight.intensity = 2.2*ramp(p.alt,0,8);
+    sky.intensity = 0.12 + 1.0*ramp(p.alt,-6,12);
+    scene.background.copy(SKY_NIGHT).lerp(SKY_DUSK, ramp(p.alt,-12,-2)).lerp(SKY_DAY, ramp(p.alt,-2,10));
+  }
   function setRoom(){
     const k=state.loc; studio.visible=k==="studio"; room.visible=k==="booth"; outdoor.visible=k==="outdoor"; grid.visible=k==="booth";
+    indoorLights.visible = k!=="outdoor";
     scene.background=new THREE.Color(k==="outdoor"?"#cfd3d6":"#2a2f36"); cam.far=k==="outdoor"?120:30; draw();
   }
 
@@ -956,6 +1103,7 @@ if(THREE){
   const nose = new THREE.Mesh(new THREE.ConeGeometry(0.035, 0.09, 12), new THREE.MeshStandardMaterial({ color:"#ffffff" })); nose.rotation.z=-Math.PI/2; nose.position.set(0.12,1.58,0);
   const legs = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.8, 0.26), skin); legs.position.y=0.4;
   fig.add(body, head, nose, legs);
+  fig.traverse(o=>{ if(o.isMesh) o.castShadow=true; });
 
   let canvas=null, msg=null, current=null;
 
@@ -983,7 +1131,7 @@ if(THREE){
     const w = canvas.parentElement.clientWidth || 340, a=aspect(sh);
     const h = Math.round(Math.min(w/a, 420)); const ww = Math.round(h*a);
     renderer.setSize(ww, h, false); canvas.style.width = ww+"px"; canvas.style.height=h+"px"; canvas.style.margin="0 auto";
-    place(sh); renderer.render(scene, cam);
+    place(sh); updateSun(); renderer.render(scene, cam);
   }
   P.attach = (cv, m) => {
     canvas = cv; msg = m;
@@ -996,13 +1144,14 @@ if(THREE){
   P.snapshot = async sh => {
     if(!sh?.camera || P.failed) return "";
     const a=aspect(sh), h=400, w=Math.round(h*a);
-    const prev=current; renderer.setSize(w,h,false); place(sh); renderer.render(scene,cam);
+    const prev=current; renderer.setSize(w,h,false); place(sh); updateSun(); renderer.render(scene,cam);
     const url=renderer.domElement.toDataURL("image/jpeg",.85); current=prev; draw(); return url;
   };
   // orbit view: a second renderer on the same scene, plus a marker for every shot's model and camera
   const orbitR = new THREE.WebGLRenderer({ antialias:true });
   orbitR.setPixelRatio(Math.min(2, window.devicePixelRatio||1));
   orbitR.outputColorSpace = THREE.SRGBColorSpace;
+  orbitR.shadowMap.enabled = true; orbitR.shadowMap.type = THREE.PCFSoftShadowMap;
   document.getElementById("orbitWrap").appendChild(orbitR.domElement);
   const orbitCam = new THREE.PerspectiveCamera(50, 1.5, 0.05, 300);
   const controls = new OrbitControls(orbitCam, orbitR.domElement);
@@ -1061,7 +1210,7 @@ if(THREE){
     orbitR.setSize(w, h, false); orbitCam.aspect=w/h; orbitCam.updateProjectionMatrix();
     if(rebuild) buildPins();
     const fv=fig.visible; fig.visible=false; pins.visible=true;   // the preview's own mannequin would double up
-    orbitR.render(scene, orbitCam);
+    updateSun(); orbitR.render(scene, orbitCam);
     pins.visible=false; fig.visible=fv;
   }
   P.setOrbit = on => { orbitOn=on; if(on && framedLoc!==state.loc) frameOrbit(); drawOrbit(true); };

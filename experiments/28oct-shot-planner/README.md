@@ -28,6 +28,14 @@ Plan coordinates are in metres. The origin is the room centre, x points right an
 
 On the outdoor plan, "from back wall" means the distance from the wall face, and "from left wall" means the distance along the wall from the left end of the skull graffiti. The crop is `ROOMS.outdoor.interior` in `index.html`. For a tighter set on the mural only, change `x0` to `-3.0`, which makes the area 7.35 m wide. The 3D views always show the whole scan.
 
+**Sun.** The outdoor location has a sun bar above the plan.
+- **Live** follows the current time in New York. You can also pick a date and drag the time slider, or press **Shoot time** to jump to the shoot date set at the top.
+- The 3D view and the camera view light the scan with the sun at that time, with shadows. The plan's compass shows north and the sun's direction.
+- The bar shows today's sunrise, sunset and the hours when sun falls on the wall. The shot sheet records the simulated time.
+- Sun positions use the SunCalc formulas for 40.7058 N, 73.9332 W and are accurate to within a few minutes.
+- Two limits: buildings that aren't in the scan (across the street, beyond the wall's top) cast no shadows, and the scan's texture still carries the light from the day it was scanned.
+- **The wall's compass direction is a guess (WSW).** The scan has no compass. Stand with your back to the wall, read a compass app, and set **Wall faces** on the bar. To make it the default, set `wallFacing` in `ROOMS.outdoor`.
+
 After a rescan, replace the GLB and run `python3 scan-prep.py` (it needs numpy and pillow). This regenerates `outdoor-glb.js` and the two `ref/56-bogart-scan-*.jpg` renders. If the wall or ground moved, update `WALL_X` and `GROUND_Y` in the script and in `ROOMS.outdoor.scan`.
 
 ## Using it
